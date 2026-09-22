@@ -63,6 +63,24 @@ int Battery::readLevel() {
 #if LILKA_VERSION < 2
     return -1;
 #else
+    // Preserve the original public API behavior for existing applications.
+    float voltage = rawValueToVoltage(readRawValue());
+    if (voltage < 0.5f) {
+        return -1;
+    }
+
+    float maxVoltage = fullVoltage < LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE
+        ? fullVoltage
+        : LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
+    float level = (voltage - emptyVoltage) * 100.0f / (maxVoltage - emptyVoltage);
+    return constrain(level, 0, 100);
+#endif
+}
+
+int Battery::readEstimatedLevel() {
+#if LILKA_VERSION < 2
+    return -1;
+#else
     uint16_t rawValue = readRawValue();
     float rawVoltage = rawValueToVoltage(rawValue);
     if (rawVoltage < 0.5f) {
