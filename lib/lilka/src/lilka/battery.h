@@ -1,5 +1,4 @@
-#ifndef LILKA_BATTERY_H
-#define LILKA_BATTERY_H
+#pragma once
 
 #include <stdint.h>
 
@@ -51,6 +50,21 @@ public:
     /// \see readLevel
     uint16_t readRawValue();
 
+    /// Прочитати відкалібровану напругу акумулятора у вольтах.
+    ///
+    /// Значення враховує корекцію, встановлену через setVoltageOffsetMilliVolts().
+    /// Якщо акумулятор не підключений, повертається не відкаліброване значення АЦП.
+    float readVoltage();
+
+    /// Отримати корекцію напруги акумулятора у мілівольтах.
+    /// За замовчуванням використовується 0 мВ.
+    int16_t getVoltageOffsetMilliVolts() const;
+    /// Встановити корекцію напруги акумулятора у мілівольтах.
+    ///
+    /// Значення зберігається в NVS і застосовується до readVoltage() та readLevel().
+    /// Допустимий діапазон: від -500 до +500 мВ.
+    void setVoltageOffsetMilliVolts(int16_t offset);
+
     /// Встановити напругу акумулятора, при якій він вважається порожнім.
     /// За замовчуванням використовується значення `LILKA_DEFAULT_EMPTY_VOLTAGE`.
     void setEmptyVoltage(float voltage);
@@ -61,6 +75,9 @@ public:
 private:
     float emptyVoltage;
     float fullVoltage;
+    int16_t voltageOffsetMilliVolts;
+
+    float readUncalibratedVoltage();
 };
 
 /// Екземпляр класу `Battery`, який можна використовувати для вимірювання рівня заряду акумулятора.
@@ -68,5 +85,3 @@ private:
 extern Battery battery;
 
 } // namespace lilka
-
-#endif

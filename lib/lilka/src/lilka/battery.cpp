@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Preferences.h>
 #include <driver/adc.h>
 
 #include "battery.h"
@@ -10,7 +11,15 @@ namespace lilka {
 #define fmap(x, in_min, in_max, out_min, out_max) (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
 #define fmin(a, b)                                ((a) < (b) ? (a) : (b))
 
-Battery::Battery() : emptyVoltage(LILKA_DEFAULT_EMPTY_VOLTAGE), fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE) {
+namespace {
+constexpr char BATTERY_NVS_NAMESPACE[] = "lilka-battery";
+constexpr char BATTERY_NVS_VOLTAGE_OFFSET_KEY[] = "voltageOffsetMv";
+constexpr int16_t BATTERY_MIN_VOLTAGE_OFFSET_MV = -500;
+constexpr int16_t BATTERY_MAX_VOLTAGE_OFFSET_MV = 500;
+} // namespace
+
+Battery::Battery()
+    : emptyVoltage(LILKA_DEFAULT_EMPTY_VOLTAGE), fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE), voltageOffsetMilliVolts(0) {
 }
 
 void Battery::begin() {
@@ -22,6 +31,11 @@ void Battery::begin() {
     LILKA_BATTERY_ADC_FUNC(config_channel_atten)(LILKA_BATTERY_ADC_CHANNEL, ADC_ATTEN_DB_11); // 0..3100mV
     // adcX_config_width(adc_width_t width)
     LILKA_BATTERY_ADC_FUNC(config_width)(ADC_WIDTH_BIT_12);
+
+    Preferences prefs;
+    prefs.begin(BATTERY_NVS_NAMESPACE, true);
+    voltageOffsetMilliVolts = prefs.getShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, 0);
+    prefs.end();
 #endif
 }
 
@@ -34,18 +48,46 @@ int Battery::readLevel() {
     // Але при повністю зарядженому акумуляторі (4.2V) напруга на АЦП може бути трохи вищою за максимальне читабельне значення (3.158V замість 3.1V).
     // Тому ми сприймаємо таке перевищення як "100%".
 
-    uint16_t value = readRawValue();
-    float voltage = (float)value / 4095.0 * LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
-    if (voltage < 0.5) {
+    float uncalibratedVoltage = readUncalibratedVoltage();
+    if (uncalibratedVoltage < 0.5) {
         return -1;
     }
+    float voltage = uncalibratedVoltage + voltageOffsetMilliVolts / 1000.0f;
 
     // Максимальна напруга акумулятора, яку ми можемо виміряти
-    float maxVoltage = fmin(fullVoltage, LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE);
+    float maxVoltage = fmin(
+        fullVoltage, LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE + voltageOffsetMilliVolts / 1000.0f
+    );
 
     // Інтерполюємо діапазон [emptyValue;maxVoltage] в діапазон [0;100]
     float level = fmap(voltage, emptyVoltage, maxVoltage, 0, 100);
     return constrain(level, 0, 100);
+#endif
+}
+
+float Battery::readVoltage() {
+#if LILKA_VERSION < 2
+    return 0;
+#else
+    float voltage = readUncalibratedVoltage();
+    if (voltage < 0.5) {
+        return voltage;
+    }
+    return voltage + voltageOffsetMilliVolts / 1000.0f;
+#endif
+}
+
+int16_t Battery::getVoltageOffsetMilliVolts() const {
+    return voltageOffsetMilliVolts;
+}
+
+void Battery::setVoltageOffsetMilliVolts(int16_t offset) {
+    voltageOffsetMilliVolts = constrain(offset, BATTERY_MIN_VOLTAGE_OFFSET_MV, BATTERY_MAX_VOLTAGE_OFFSET_MV);
+#if LILKA_VERSION >= 2
+    Preferences prefs;
+    prefs.begin(BATTERY_NVS_NAMESPACE, false);
+    prefs.putShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, voltageOffsetMilliVolts);
+    prefs.end();
 #endif
 }
 
@@ -65,6 +107,11 @@ uint16_t Battery::readRawValue() {
     uint16_t value = values[count / 2];
     return value;
 #endif
+}
+
+float Battery::readUncalibratedVoltage() {
+    uint16_t value = readRawValue();
+    return (float)value / 4095.0 * LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
 }
 
 void Battery::setEmptyVoltage(float voltage) {
