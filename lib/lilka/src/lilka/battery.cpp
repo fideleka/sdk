@@ -12,7 +12,7 @@ namespace lilka {
 #define fmin(a, b)                                ((a) < (b) ? (a) : (b))
 
 namespace {
-constexpr char BATTERY_NVS_NAMESPACE[] = "lilka-battery";
+constexpr char BATTERY_NVS_NAMESPACE[] = "battery";
 constexpr char BATTERY_NVS_VOLTAGE_OFFSET_KEY[] = "voltageOffsetMv";
 constexpr int16_t BATTERY_MIN_VOLTAGE_OFFSET_MV = -500;
 constexpr int16_t BATTERY_MAX_VOLTAGE_OFFSET_MV = 500;
