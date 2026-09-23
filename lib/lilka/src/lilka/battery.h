@@ -65,15 +65,14 @@ public:
 
     /// Прочитати напругу акумулятора, розраховану з сирого значення АЦП.
     ///
-    /// Значення не враховує ручну корекцію напруги.
+    /// Значення використовує заводське калібрування АЦП.
     float readRawVoltage();
-    /// Прочитати напругу акумулятора з урахуванням ручної корекції.
+    /// Прочитати відкалібровану напругу акумулятора.
     float readVoltage();
 
     /// Прочитати оцінений рівень заряду за типовою LiPo-кривою.
     ///
-    /// Враховує калібровку повного заряду, якщо вона збережена. До такої
-    /// калібровки використовує ручну корекцію напруги.
+    /// Враховує калібровку повного заряду, якщо вона збережена.
     /// \return Рівень заряду акумулятора від 0 до 100. Якщо акумулятор відсутній, повертається -1.
     int readEstimatedLevel();
 
@@ -94,16 +93,6 @@ public:
     /// Перевірити, чи збережено калібровку рівня повного заряду.
     bool hasFullLevelCalibration() const;
 
-    /// Отримати ручну корекцію напруги у мілівольтах.
-    int16_t getVoltageOffsetMilliVolts() const;
-    /// Встановити ручну корекцію напруги у мілівольтах.
-    ///
-    /// Корекція застосовується до readVoltage(). Вона застосовується до readEstimatedLevel()
-    /// лише якщо рівень повного заряду ще не відкалібровано.
-    void setVoltageOffsetMilliVolts(int16_t offset);
-    /// Скинути ручну корекцію напруги.
-    void resetVoltageOffset();
-
     /// Встановити напругу акумулятора, при якій він вважається порожнім.
     /// За замовчуванням використовується значення `LILKA_DEFAULT_EMPTY_VOLTAGE`.
     void setEmptyVoltage(float voltage);
@@ -115,7 +104,6 @@ private:
     float emptyVoltage;
     float fullVoltage;
     uint16_t fullLevelRawValue;
-    int16_t voltageOffsetMilliVolts;
     BatteryDischargeProfile dischargeProfile;
 
     float rawValueToVoltage(uint16_t value) const;

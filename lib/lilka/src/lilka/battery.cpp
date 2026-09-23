@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include <driver/adc.h>
+#include <esp_adc_cal.h>
 
 #include "battery.h"
 #include "config.h"
@@ -11,13 +12,13 @@ namespace lilka {
 namespace {
 constexpr char BATTERY_NVS_NAMESPACE[] = "battery";
 constexpr char BATTERY_NVS_FULL_LEVEL_RAW_KEY[] = "fullRawAdc";
-constexpr char BATTERY_NVS_VOLTAGE_OFFSET_KEY[] = "voltageOffsetMv";
 constexpr char BATTERY_NVS_DISCHARGE_PROFILE_KEY[] = "profile";
-constexpr int16_t BATTERY_MIN_VOLTAGE_OFFSET_MV = -500;
-constexpr int16_t BATTERY_MAX_VOLTAGE_OFFSET_MV = 500;
 constexpr float BATTERY_MIN_FULL_LEVEL_VOLTAGE = 3.5f;
 constexpr uint16_t BATTERY_MAX_RAW_VALUE = 4095;
 constexpr float BATTERY_LEVEL_ROUNDING_EPSILON = 0.0001f;
+constexpr uint32_t BATTERY_ADC_DEFAULT_VREF_MV = 1100;
+
+esp_adc_cal_characteristics_t batteryAdcCharacteristics;
 
 struct BatteryCurvePoint {
     float voltage;
@@ -121,7 +122,6 @@ Battery::Battery() :
     emptyVoltage(LILKA_DEFAULT_EMPTY_VOLTAGE),
     fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE),
     fullLevelRawValue(0),
-    voltageOffsetMilliVolts(0),
     dischargeProfile(BatteryDischargeProfile::Smooth) {
 }
 
@@ -134,12 +134,14 @@ void Battery::begin() {
     LILKA_BATTERY_ADC_FUNC(config_channel_atten)(LILKA_BATTERY_ADC_CHANNEL, ADC_ATTEN_DB_11); // 0..3100mV
     // adcX_config_width(adc_width_t width)
     LILKA_BATTERY_ADC_FUNC(config_width)(ADC_WIDTH_BIT_12);
+    esp_adc_cal_characterize(
+        ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, BATTERY_ADC_DEFAULT_VREF_MV, &batteryAdcCharacteristics
+    );
 
     uint16_t savedFullLevelRawValue = 0;
     Preferences prefs;
     if (prefs.begin(BATTERY_NVS_NAMESPACE, true)) {
         savedFullLevelRawValue = prefs.getUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, 0);
-        voltageOffsetMilliVolts = prefs.getShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, 0);
         uint8_t savedProfile =
             prefs.getUChar(BATTERY_NVS_DISCHARGE_PROFILE_KEY, static_cast<uint8_t>(BatteryDischargeProfile::Smooth));
         if (savedProfile <= static_cast<uint8_t>(BatteryDischargeProfile::VerySmooth)) {
@@ -152,8 +154,6 @@ void Battery::begin() {
         rawValueToVoltage(savedFullLevelRawValue) >= BATTERY_MIN_FULL_LEVEL_VOLTAGE) {
         fullLevelRawValue = savedFullLevelRawValue;
     }
-    voltageOffsetMilliVolts =
-        constrain(voltageOffsetMilliVolts, BATTERY_MIN_VOLTAGE_OFFSET_MV, BATTERY_MAX_VOLTAGE_OFFSET_MV);
 #endif
 }
 
@@ -194,7 +194,7 @@ int Battery::readEstimatedLevel() {
         }
     }
 
-    return levelFromVoltage(rawVoltage + voltageOffsetMilliVolts / 1000.0f);
+    return levelFromVoltage(rawVoltage);
 #endif
 }
 
@@ -224,11 +224,7 @@ float Battery::readRawVoltage() {
 }
 
 float Battery::readVoltage() {
-    float voltage = readRawVoltage();
-    if (voltage < 0.5f) {
-        return voltage;
-    }
-    return voltage + voltageOffsetMilliVolts / 1000.0f;
+    return readRawVoltage();
 }
 
 bool Battery::calibrateFullLevel() {
@@ -263,30 +259,6 @@ bool Battery::hasFullLevelCalibration() const {
     return fullLevelRawValue != 0;
 }
 
-int16_t Battery::getVoltageOffsetMilliVolts() const {
-    return voltageOffsetMilliVolts;
-}
-
-void Battery::setVoltageOffsetMilliVolts(int16_t offset) {
-    voltageOffsetMilliVolts = constrain(offset, BATTERY_MIN_VOLTAGE_OFFSET_MV, BATTERY_MAX_VOLTAGE_OFFSET_MV);
-#if LILKA_VERSION >= 2
-    Preferences prefs;
-    prefs.begin(BATTERY_NVS_NAMESPACE, false);
-    prefs.putShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, voltageOffsetMilliVolts);
-    prefs.end();
-#endif
-}
-
-void Battery::resetVoltageOffset() {
-    voltageOffsetMilliVolts = 0;
-#if LILKA_VERSION >= 2
-    Preferences prefs;
-    prefs.begin(BATTERY_NVS_NAMESPACE, false);
-    prefs.remove(BATTERY_NVS_VOLTAGE_OFFSET_KEY);
-    prefs.end();
-#endif
-}
-
 uint16_t Battery::readRawValue() {
 #if LILKA_VERSION < 2
     return 0;
@@ -306,7 +278,8 @@ uint16_t Battery::readRawValue() {
 }
 
 float Battery::rawValueToVoltage(uint16_t value) const {
-    return (float)value / BATTERY_MAX_RAW_VALUE * LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
+    float adcVoltage = esp_adc_cal_raw_to_voltage(value, &batteryAdcCharacteristics) / 1000.0f;
+    return adcVoltage / LILKA_BATTERY_VOLTAGE_DIVIDER;
 }
 
 int Battery::levelFromVoltage(float voltage) const {
