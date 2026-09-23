@@ -12,6 +12,7 @@ namespace {
 constexpr char BATTERY_NVS_NAMESPACE[] = "battery";
 constexpr char BATTERY_NVS_FULL_LEVEL_RAW_KEY[] = "fullRawAdc";
 constexpr char BATTERY_NVS_VOLTAGE_OFFSET_KEY[] = "voltageOffsetMv";
+constexpr char BATTERY_NVS_DISCHARGE_PROFILE_KEY[] = "profile";
 constexpr int16_t BATTERY_MIN_VOLTAGE_OFFSET_MV = -500;
 constexpr int16_t BATTERY_MAX_VOLTAGE_OFFSET_MV = 500;
 constexpr float BATTERY_MIN_FULL_LEVEL_VOLTAGE = 3.5f;
@@ -25,7 +26,7 @@ struct BatteryCurvePoint {
 
 // Typical 1S LiPo discharge curve at moderate load. The curve is scaled to the
 // configured full and empty voltages before use.
-constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE[] = {
+constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_TYPICAL[] = {
     {4.20f, 100},
     {4.15f, 95},
     {4.10f, 90},
@@ -40,13 +41,61 @@ constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE[] = {
     {3.60f, 5},
     {3.20f, 0},
 };
+
+// A cell with a gradual low-voltage discharge keeps more usable capacity below
+// 3.8 V. This avoids parking the indicator at 5-10% for a large part of runtime.
+constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SMOOTH[] = {
+    {4.20f, 100},
+    {4.15f, 95},
+    {4.10f, 90},
+    {4.00f, 80},
+    {3.92f, 72},
+    {3.86f, 65},
+    {3.82f, 58},
+    {3.79f, 52},
+    {3.77f, 46},
+    {3.73f, 38},
+    {3.69f, 30},
+    {3.60f, 18},
+    {3.20f, 0},
+};
+
+// A cell with a steep end-of-discharge drop has little usable capacity left at
+// low voltage. This reaches the warning range earlier than the typical curve.
+constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SHARP[] = {
+    {4.20f, 100},
+    {4.15f, 95},
+    {4.10f, 90},
+    {4.00f, 78},
+    {3.92f, 65},
+    {3.86f, 52},
+    {3.82f, 40},
+    {3.79f, 30},
+    {3.77f, 22},
+    {3.73f, 14},
+    {3.69f, 8},
+    {3.60f, 3},
+    {3.20f, 0},
+};
+
+constexpr size_t BATTERY_LEVEL_CURVE_POINT_COUNT =
+    sizeof(BATTERY_LEVEL_CURVE_TYPICAL) / sizeof(BATTERY_LEVEL_CURVE_TYPICAL[0]);
+static_assert(
+    sizeof(BATTERY_LEVEL_CURVE_SMOOTH) / sizeof(BATTERY_LEVEL_CURVE_SMOOTH[0]) == BATTERY_LEVEL_CURVE_POINT_COUNT,
+    "Battery discharge profiles must have the same number of points"
+);
+static_assert(
+    sizeof(BATTERY_LEVEL_CURVE_SHARP) / sizeof(BATTERY_LEVEL_CURVE_SHARP[0]) == BATTERY_LEVEL_CURVE_POINT_COUNT,
+    "Battery discharge profiles must have the same number of points"
+);
 } // namespace
 
 Battery::Battery() :
     emptyVoltage(LILKA_DEFAULT_EMPTY_VOLTAGE),
     fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE),
     fullLevelRawValue(0),
-    voltageOffsetMilliVolts(0) {
+    voltageOffsetMilliVolts(0),
+    dischargeProfile(BatteryDischargeProfile::Typical) {
 }
 
 void Battery::begin() {
@@ -64,6 +113,11 @@ void Battery::begin() {
     if (prefs.begin(BATTERY_NVS_NAMESPACE, true)) {
         savedFullLevelRawValue = prefs.getUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, 0);
         voltageOffsetMilliVolts = prefs.getShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, 0);
+        uint8_t savedProfile =
+            prefs.getUChar(BATTERY_NVS_DISCHARGE_PROFILE_KEY, static_cast<uint8_t>(BatteryDischargeProfile::Typical));
+        if (savedProfile <= static_cast<uint8_t>(BatteryDischargeProfile::Sharp)) {
+            dischargeProfile = static_cast<BatteryDischargeProfile>(savedProfile);
+        }
         prefs.end();
     }
 
@@ -110,6 +164,23 @@ int Battery::readEstimatedLevel() {
     }
 
     return levelFromVoltage(rawVoltage + voltageOffsetMilliVolts / 1000.0f);
+#endif
+}
+
+BatteryDischargeProfile Battery::getDischargeProfile() const {
+    return dischargeProfile;
+}
+
+void Battery::setDischargeProfile(BatteryDischargeProfile profile) {
+    if (profile > BatteryDischargeProfile::Sharp) {
+        profile = BatteryDischargeProfile::Typical;
+    }
+    dischargeProfile = profile;
+#if LILKA_VERSION >= 2
+    Preferences prefs;
+    prefs.begin(BATTERY_NVS_NAMESPACE, false);
+    prefs.putUChar(BATTERY_NVS_DISCHARGE_PROFILE_KEY, static_cast<uint8_t>(dischargeProfile));
+    prefs.end();
 #endif
 }
 
@@ -208,7 +279,18 @@ float Battery::rawValueToVoltage(uint16_t value) const {
 }
 
 int Battery::levelFromVoltage(float voltage) const {
-    const size_t pointCount = sizeof(BATTERY_LEVEL_CURVE) / sizeof(BATTERY_LEVEL_CURVE[0]);
+    const BatteryCurvePoint* curve = BATTERY_LEVEL_CURVE_TYPICAL;
+    switch (dischargeProfile) {
+        case BatteryDischargeProfile::Smooth:
+            curve = BATTERY_LEVEL_CURVE_SMOOTH;
+            break;
+        case BatteryDischargeProfile::Sharp:
+            curve = BATTERY_LEVEL_CURVE_SHARP;
+            break;
+        case BatteryDischargeProfile::Typical:
+        default:
+            break;
+    }
     const float defaultRange = LILKA_DEFAULT_FULL_VOLTAGE - LILKA_DEFAULT_EMPTY_VOLTAGE;
     const float configuredRange = fullVoltage - emptyVoltage;
 
@@ -216,23 +298,22 @@ int Battery::levelFromVoltage(float voltage) const {
         return emptyVoltage + (curveVoltage - LILKA_DEFAULT_EMPTY_VOLTAGE) * configuredRange / defaultRange;
     };
 
-    if (voltage >= scaleVoltage(BATTERY_LEVEL_CURVE[0].voltage)) {
-        return BATTERY_LEVEL_CURVE[0].level;
+    if (voltage >= scaleVoltage(curve[0].voltage)) {
+        return curve[0].level;
     }
 
-    for (size_t i = 1; i < pointCount; i++) {
-        float higherVoltage = scaleVoltage(BATTERY_LEVEL_CURVE[i - 1].voltage);
-        float lowerVoltage = scaleVoltage(BATTERY_LEVEL_CURVE[i].voltage);
+    for (size_t i = 1; i < BATTERY_LEVEL_CURVE_POINT_COUNT; i++) {
+        float higherVoltage = scaleVoltage(curve[i - 1].voltage);
+        float lowerVoltage = scaleVoltage(curve[i].voltage);
         if (voltage >= lowerVoltage) {
             float range = higherVoltage - lowerVoltage;
             float position = (voltage - lowerVoltage) / range;
-            float level = BATTERY_LEVEL_CURVE[i].level +
-                          position * (BATTERY_LEVEL_CURVE[i - 1].level - BATTERY_LEVEL_CURVE[i].level);
+            float level = curve[i].level + position * (curve[i - 1].level - curve[i].level);
             return ceilf(level - BATTERY_LEVEL_ROUNDING_EPSILON);
         }
     }
 
-    return BATTERY_LEVEL_CURVE[pointCount - 1].level;
+    return curve[BATTERY_LEVEL_CURVE_POINT_COUNT - 1].level;
 }
 
 void Battery::setEmptyVoltage(float voltage) {

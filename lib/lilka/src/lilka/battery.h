@@ -5,6 +5,13 @@
 
 namespace lilka {
 
+/// Профіль розряджання, який використовується для оцінки рівня заряду.
+enum class BatteryDischargeProfile : uint8_t {
+    Typical = 0,
+    Smooth,
+    Sharp,
+};
+
 /// Номінальне значення напруги LiPo акумулятора, при якій вважається, що він порожній.
 #define LILKA_DEFAULT_EMPTY_VOLTAGE 3.2
 /// Номінальне значення напруги LiPo акумулятора, при якій вважається, що він повністю заряджений.
@@ -69,6 +76,11 @@ public:
     /// \return Рівень заряду акумулятора від 0 до 100. Якщо акумулятор відсутній, повертається -1.
     int readEstimatedLevel();
 
+    /// Отримати профіль розряджання для оцінки рівня заряду.
+    BatteryDischargeProfile getDischargeProfile() const;
+    /// Встановити профіль розряджання для оцінки рівня заряду.
+    void setDischargeProfile(BatteryDischargeProfile profile);
+
     /// Зберегти поточне значення АЦП як рівень повного заряду.
     ///
     /// Викликайте цей метод лише коли акумулятор повністю заряджений і USB відключено.
@@ -102,6 +114,7 @@ private:
     float fullVoltage;
     uint16_t fullLevelRawValue;
     int16_t voltageOffsetMilliVolts;
+    BatteryDischargeProfile dischargeProfile;
 
     float rawValueToVoltage(uint16_t value) const;
     int levelFromVoltage(float voltage) const;
