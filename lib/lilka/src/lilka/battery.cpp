@@ -15,6 +15,7 @@ constexpr char BATTERY_NVS_VOLTAGE_OFFSET_KEY[] = "voltageOffsetMv";
 constexpr int16_t BATTERY_MIN_VOLTAGE_OFFSET_MV = -500;
 constexpr int16_t BATTERY_MAX_VOLTAGE_OFFSET_MV = 500;
 constexpr float BATTERY_MIN_FULL_LEVEL_VOLTAGE = 3.5f;
+constexpr uint16_t BATTERY_MAX_RAW_VALUE = 4095;
 
 struct BatteryCurvePoint {
     float voltage;
@@ -24,14 +25,27 @@ struct BatteryCurvePoint {
 // Typical 1S LiPo discharge curve at moderate load. The curve is scaled to the
 // configured full and empty voltages before use.
 constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE[] = {
-    {4.20f, 100}, {4.15f, 95}, {4.10f, 90}, {4.00f, 80}, {3.92f, 70}, {3.86f, 60}, {3.82f, 50},
-    {3.79f, 40},  {3.77f, 30}, {3.73f, 20}, {3.69f, 10}, {3.60f, 5},  {3.20f, 0},
+    {4.20f, 100},
+    {4.15f, 95},
+    {4.10f, 90},
+    {4.00f, 80},
+    {3.92f, 70},
+    {3.86f, 60},
+    {3.82f, 50},
+    {3.79f, 40},
+    {3.77f, 30},
+    {3.73f, 20},
+    {3.69f, 10},
+    {3.60f, 5},
+    {3.20f, 0},
 };
 } // namespace
 
-Battery::Battery()
-    : emptyVoltage(LILKA_DEFAULT_EMPTY_VOLTAGE), fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE),
-      fullLevelRawValue(0), voltageOffsetMilliVolts(0) {
+Battery::Battery() :
+    emptyVoltage(LILKA_DEFAULT_EMPTY_VOLTAGE),
+    fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE),
+    fullLevelRawValue(0),
+    voltageOffsetMilliVolts(0) {
 }
 
 void Battery::begin() {
@@ -44,18 +58,20 @@ void Battery::begin() {
     // adcX_config_width(adc_width_t width)
     LILKA_BATTERY_ADC_FUNC(config_width)(ADC_WIDTH_BIT_12);
 
+    uint16_t savedFullLevelRawValue = 0;
     Preferences prefs;
-    prefs.begin(BATTERY_NVS_NAMESPACE, true);
-    uint16_t savedFullLevelRawValue = prefs.getUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, 0);
-    voltageOffsetMilliVolts = prefs.getShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, 0);
-    prefs.end();
+    if (prefs.begin(BATTERY_NVS_NAMESPACE, true)) {
+        savedFullLevelRawValue = prefs.getUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, 0);
+        voltageOffsetMilliVolts = prefs.getShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, 0);
+        prefs.end();
+    }
 
-    if (rawValueToVoltage(savedFullLevelRawValue) >= BATTERY_MIN_FULL_LEVEL_VOLTAGE) {
+    if (savedFullLevelRawValue <= BATTERY_MAX_RAW_VALUE &&
+        rawValueToVoltage(savedFullLevelRawValue) >= BATTERY_MIN_FULL_LEVEL_VOLTAGE) {
         fullLevelRawValue = savedFullLevelRawValue;
     }
-    voltageOffsetMilliVolts = constrain(
-        voltageOffsetMilliVolts, BATTERY_MIN_VOLTAGE_OFFSET_MV, BATTERY_MAX_VOLTAGE_OFFSET_MV
-    );
+    voltageOffsetMilliVolts =
+        constrain(voltageOffsetMilliVolts, BATTERY_MIN_VOLTAGE_OFFSET_MV, BATTERY_MAX_VOLTAGE_OFFSET_MV);
 #endif
 }
 
@@ -69,9 +85,8 @@ int Battery::readLevel() {
         return -1;
     }
 
-    float maxVoltage = fullVoltage < LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE
-        ? fullVoltage
-        : LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
+    float maxVoltage =
+        fullVoltage < LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE ? fullVoltage : LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
     float level = (voltage - emptyVoltage) * 100.0f / (maxVoltage - emptyVoltage);
     return constrain(level, 0, 100);
 #endif
@@ -188,7 +203,7 @@ uint16_t Battery::readRawValue() {
 }
 
 float Battery::rawValueToVoltage(uint16_t value) const {
-    return (float)value / 4095.0f * LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
+    return (float)value / BATTERY_MAX_RAW_VALUE * LILKA_BATTERY_MAX_MEASURABLE_VOLTAGE;
 }
 
 int Battery::levelFromVoltage(float voltage) const {
@@ -197,8 +212,7 @@ int Battery::levelFromVoltage(float voltage) const {
     const float configuredRange = fullVoltage - emptyVoltage;
 
     auto scaleVoltage = [this, defaultRange, configuredRange](float curveVoltage) {
-        return emptyVoltage
-            + (curveVoltage - LILKA_DEFAULT_EMPTY_VOLTAGE) * configuredRange / defaultRange;
+        return emptyVoltage + (curveVoltage - LILKA_DEFAULT_EMPTY_VOLTAGE) * configuredRange / defaultRange;
     };
 
     if (voltage >= scaleVoltage(BATTERY_LEVEL_CURVE[0].voltage)) {
@@ -211,8 +225,8 @@ int Battery::levelFromVoltage(float voltage) const {
         if (voltage >= lowerVoltage) {
             float range = higherVoltage - lowerVoltage;
             float position = (voltage - lowerVoltage) / range;
-            return BATTERY_LEVEL_CURVE[i].level
-                + roundf(position * (BATTERY_LEVEL_CURVE[i - 1].level - BATTERY_LEVEL_CURVE[i].level));
+            return BATTERY_LEVEL_CURVE[i].level +
+                   roundf(position * (BATTERY_LEVEL_CURVE[i - 1].level - BATTERY_LEVEL_CURVE[i].level));
         }
     }
 
