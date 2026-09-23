@@ -39,6 +39,7 @@ constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_TYPICAL[] = {
     {3.73f, 20},
     {3.69f, 10},
     {3.60f, 5},
+    {3.35f, 2},
     {3.20f, 0},
 };
 
@@ -57,6 +58,26 @@ constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SMOOTH[] = {
     {3.73f, 38},
     {3.69f, 30},
     {3.60f, 18},
+    {3.35f, 7},
+    {3.20f, 0},
+};
+
+// A cell with a very long low-voltage plateau can retain substantial usable
+// capacity below 3.6 V.
+constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_VERY_SMOOTH[] = {
+    {4.20f, 100},
+    {4.15f, 96},
+    {4.10f, 92},
+    {4.00f, 85},
+    {3.92f, 78},
+    {3.86f, 70},
+    {3.82f, 64},
+    {3.79f, 58},
+    {3.77f, 53},
+    {3.73f, 47},
+    {3.69f, 42},
+    {3.60f, 35},
+    {3.35f, 18},
     {3.20f, 0},
 };
 
@@ -75,6 +96,7 @@ constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SHARP[] = {
     {3.73f, 14},
     {3.69f, 8},
     {3.60f, 3},
+    {3.35f, 1},
     {3.20f, 0},
 };
 
@@ -82,6 +104,11 @@ constexpr size_t BATTERY_LEVEL_CURVE_POINT_COUNT =
     sizeof(BATTERY_LEVEL_CURVE_TYPICAL) / sizeof(BATTERY_LEVEL_CURVE_TYPICAL[0]);
 static_assert(
     sizeof(BATTERY_LEVEL_CURVE_SMOOTH) / sizeof(BATTERY_LEVEL_CURVE_SMOOTH[0]) == BATTERY_LEVEL_CURVE_POINT_COUNT,
+    "Battery discharge profiles must have the same number of points"
+);
+static_assert(
+    sizeof(BATTERY_LEVEL_CURVE_VERY_SMOOTH) / sizeof(BATTERY_LEVEL_CURVE_VERY_SMOOTH[0]) ==
+        BATTERY_LEVEL_CURVE_POINT_COUNT,
     "Battery discharge profiles must have the same number of points"
 );
 static_assert(
@@ -95,7 +122,7 @@ Battery::Battery() :
     fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE),
     fullLevelRawValue(0),
     voltageOffsetMilliVolts(0),
-    dischargeProfile(BatteryDischargeProfile::Typical) {
+    dischargeProfile(BatteryDischargeProfile::Smooth) {
 }
 
 void Battery::begin() {
@@ -114,8 +141,8 @@ void Battery::begin() {
         savedFullLevelRawValue = prefs.getUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, 0);
         voltageOffsetMilliVolts = prefs.getShort(BATTERY_NVS_VOLTAGE_OFFSET_KEY, 0);
         uint8_t savedProfile =
-            prefs.getUChar(BATTERY_NVS_DISCHARGE_PROFILE_KEY, static_cast<uint8_t>(BatteryDischargeProfile::Typical));
-        if (savedProfile <= static_cast<uint8_t>(BatteryDischargeProfile::Sharp)) {
+            prefs.getUChar(BATTERY_NVS_DISCHARGE_PROFILE_KEY, static_cast<uint8_t>(BatteryDischargeProfile::Smooth));
+        if (savedProfile <= static_cast<uint8_t>(BatteryDischargeProfile::VerySmooth)) {
             dischargeProfile = static_cast<BatteryDischargeProfile>(savedProfile);
         }
         prefs.end();
@@ -159,8 +186,12 @@ int Battery::readEstimatedLevel() {
 
     if (hasFullLevelCalibration()) {
         float fullLevelVoltage = rawValueToVoltage(fullLevelRawValue);
-        float voltage = rawVoltage * fullVoltage / fullLevelVoltage;
-        return levelFromVoltage(voltage);
+        float measuredRange = fullLevelVoltage - emptyVoltage;
+        if (measuredRange > 0.0f) {
+            float configuredRange = fullVoltage - emptyVoltage;
+            float normalizedVoltage = emptyVoltage + (rawVoltage - emptyVoltage) * configuredRange / measuredRange;
+            return levelFromVoltage(normalizedVoltage);
+        }
     }
 
     return levelFromVoltage(rawVoltage + voltageOffsetMilliVolts / 1000.0f);
@@ -172,8 +203,8 @@ BatteryDischargeProfile Battery::getDischargeProfile() const {
 }
 
 void Battery::setDischargeProfile(BatteryDischargeProfile profile) {
-    if (profile > BatteryDischargeProfile::Sharp) {
-        profile = BatteryDischargeProfile::Typical;
+    if (profile > BatteryDischargeProfile::VerySmooth) {
+        profile = BatteryDischargeProfile::Smooth;
     }
     dischargeProfile = profile;
 #if LILKA_VERSION >= 2
@@ -283,6 +314,9 @@ int Battery::levelFromVoltage(float voltage) const {
     switch (dischargeProfile) {
         case BatteryDischargeProfile::Smooth:
             curve = BATTERY_LEVEL_CURVE_SMOOTH;
+            break;
+        case BatteryDischargeProfile::VerySmooth:
+            curve = BATTERY_LEVEL_CURVE_VERY_SMOOTH;
             break;
         case BatteryDischargeProfile::Sharp:
             curve = BATTERY_LEVEL_CURVE_SHARP;
