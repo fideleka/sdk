@@ -48,10 +48,10 @@ constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_TYPICAL[] = {
 // 3.8 V. This avoids parking the indicator at 5-10% for a large part of runtime.
 constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SMOOTH[] = {
     {4.20f, 100},
-    {4.15f, 95},
-    {4.10f, 90},
-    {4.00f, 80},
-    {3.92f, 72},
+    {4.15f, 98},
+    {4.10f, 95},
+    {4.00f, 88},
+    {3.92f, 80},
     {3.86f, 65},
     {3.82f, 58},
     {3.79f, 52},
@@ -67,10 +67,10 @@ constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SMOOTH[] = {
 // capacity below 3.6 V.
 constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_VERY_SMOOTH[] = {
     {4.20f, 100},
-    {4.15f, 96},
-    {4.10f, 92},
-    {4.00f, 85},
-    {3.92f, 78},
+    {4.15f, 99},
+    {4.10f, 97},
+    {4.00f, 93},
+    {3.92f, 88},
     {3.86f, 70},
     {3.82f, 64},
     {3.79f, 58},
