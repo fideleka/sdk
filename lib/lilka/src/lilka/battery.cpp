@@ -16,6 +16,7 @@ constexpr int16_t BATTERY_MIN_VOLTAGE_OFFSET_MV = -500;
 constexpr int16_t BATTERY_MAX_VOLTAGE_OFFSET_MV = 500;
 constexpr float BATTERY_MIN_FULL_LEVEL_VOLTAGE = 3.5f;
 constexpr uint16_t BATTERY_MAX_RAW_VALUE = 4095;
+constexpr float BATTERY_LEVEL_ROUNDING_EPSILON = 0.0001f;
 
 struct BatteryCurvePoint {
     float voltage;
@@ -225,8 +226,9 @@ int Battery::levelFromVoltage(float voltage) const {
         if (voltage >= lowerVoltage) {
             float range = higherVoltage - lowerVoltage;
             float position = (voltage - lowerVoltage) / range;
-            return BATTERY_LEVEL_CURVE[i].level +
-                   roundf(position * (BATTERY_LEVEL_CURVE[i - 1].level - BATTERY_LEVEL_CURVE[i].level));
+            float level = BATTERY_LEVEL_CURVE[i].level +
+                          position * (BATTERY_LEVEL_CURVE[i - 1].level - BATTERY_LEVEL_CURVE[i].level);
+            return ceilf(level - BATTERY_LEVEL_ROUNDING_EPSILON);
         }
     }
 
