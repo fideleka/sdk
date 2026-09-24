@@ -7,10 +7,19 @@ namespace lilka {
 
 /// Профіль розряджання, який використовується для оцінки рівня заряду.
 enum class BatteryDischargeProfile : uint8_t {
-    Typical = 0,
-    Smooth = 1,
-    Sharp = 2,
-    VerySmooth = 3,
+    // Reinterpret the former VerySmooth NVS value as the new default Normal.
+    SharpTop = 0,
+    SmoothTop = 1,
+    SharpBottom = 2,
+    Normal = 3,
+    SmoothBottom = 4,
+    SharpEnds = 5,
+    SmoothEnds = 6,
+    // Keep existing source clients compiling; these names are not shown in the menu.
+    Typical = Normal,
+    Smooth = SmoothEnds,
+    Sharp = SharpEnds,
+    VerySmooth = Normal,
 };
 
 /// Номінальне значення напруги LiPo акумулятора, при якій вважається, що він порожній.

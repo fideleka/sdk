@@ -20,100 +20,28 @@ constexpr uint32_t BATTERY_ADC_DEFAULT_VREF_MV = 1100;
 
 esp_adc_cal_characteristics_t batteryAdcCharacteristics;
 
-struct BatteryCurvePoint {
-    float voltage;
-    uint8_t level;
+// Provisional voltage anchors inferred from a nine-hour Doom discharge using
+// the previous Very smooth profile. Percentages target usable runtime, not a
+// measured cell-capacity curve. All variants preserve the same endpoints.
+constexpr float BATTERY_CURVE_VOLTAGES[] =
+    {4.200f, 4.000f, 3.853f, 3.730f, 3.639f, 3.571f, 3.541f, 3.482f, 3.379f, 3.200f};
+constexpr uint8_t BATTERY_CURVE_LEVELS[][10] = {
+    {100, 81, 69, 61, 53, 44, 33, 22, 11, 0}, // Sharp top
+    {100, 94, 86, 74, 59, 44, 33, 22, 11, 0}, // Smooth top
+    {100, 89, 78, 67, 56, 44, 36, 28, 18, 0}, // Sharp bottom
+    {100, 89, 78, 67, 56, 44, 33, 22, 11, 0}, // Normal
+    {100, 89, 78, 67, 56, 44, 30, 16, 5, 0}, // Smooth bottom
+    {100, 81, 69, 61, 53, 44, 36, 28, 18, 0}, // Sharp ends
+    {100, 94, 86, 74, 59, 44, 30, 16, 5, 0}, // Smooth ends
 };
-
-// Typical 1S LiPo discharge curve at moderate load. The curve is scaled to the
-// configured full and empty voltages before use.
-constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_TYPICAL[] = {
-    {4.20f, 100},
-    {4.15f, 95},
-    {4.10f, 90},
-    {4.00f, 80},
-    {3.92f, 70},
-    {3.86f, 60},
-    {3.82f, 50},
-    {3.79f, 40},
-    {3.77f, 30},
-    {3.73f, 20},
-    {3.69f, 10},
-    {3.60f, 5},
-    {3.35f, 2},
-    {3.20f, 0},
-};
-
-// A cell with a gradual low-voltage discharge keeps more usable capacity below
-// 3.8 V. This avoids parking the indicator at 5-10% for a large part of runtime.
-constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SMOOTH[] = {
-    {4.20f, 100},
-    {4.15f, 98},
-    {4.10f, 95},
-    {4.00f, 88},
-    {3.92f, 80},
-    {3.86f, 65},
-    {3.82f, 58},
-    {3.79f, 52},
-    {3.77f, 46},
-    {3.73f, 38},
-    {3.69f, 30},
-    {3.60f, 18},
-    {3.35f, 7},
-    {3.20f, 0},
-};
-
-// A cell with a very long low-voltage plateau can retain substantial usable
-// capacity below 3.6 V.
-constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_VERY_SMOOTH[] = {
-    {4.20f, 100},
-    {4.15f, 99},
-    {4.10f, 97},
-    {4.00f, 93},
-    {3.92f, 88},
-    {3.86f, 70},
-    {3.82f, 64},
-    {3.79f, 58},
-    {3.77f, 53},
-    {3.73f, 47},
-    {3.69f, 42},
-    {3.60f, 35},
-    {3.35f, 18},
-    {3.20f, 0},
-};
-
-// A cell with a steep end-of-discharge drop has little usable capacity left at
-// low voltage. This reaches the warning range earlier than the typical curve.
-constexpr BatteryCurvePoint BATTERY_LEVEL_CURVE_SHARP[] = {
-    {4.20f, 100},
-    {4.15f, 95},
-    {4.10f, 90},
-    {4.00f, 78},
-    {3.92f, 65},
-    {3.86f, 52},
-    {3.82f, 40},
-    {3.79f, 30},
-    {3.77f, 22},
-    {3.73f, 14},
-    {3.69f, 8},
-    {3.60f, 3},
-    {3.35f, 1},
-    {3.20f, 0},
-};
-
-constexpr size_t BATTERY_LEVEL_CURVE_POINT_COUNT =
-    sizeof(BATTERY_LEVEL_CURVE_TYPICAL) / sizeof(BATTERY_LEVEL_CURVE_TYPICAL[0]);
+constexpr size_t BATTERY_LEVEL_CURVE_POINT_COUNT = sizeof(BATTERY_CURVE_VOLTAGES) / sizeof(BATTERY_CURVE_VOLTAGES[0]);
 static_assert(
-    sizeof(BATTERY_LEVEL_CURVE_SMOOTH) / sizeof(BATTERY_LEVEL_CURVE_SMOOTH[0]) == BATTERY_LEVEL_CURVE_POINT_COUNT,
-    "Battery discharge profiles must have the same number of points"
+    sizeof(BATTERY_CURVE_LEVELS) / sizeof(BATTERY_CURVE_LEVELS[0]) ==
+        static_cast<uint8_t>(BatteryDischargeProfile::SmoothEnds) + 1,
+    "Battery discharge profiles must have a curve for each persisted value"
 );
 static_assert(
-    sizeof(BATTERY_LEVEL_CURVE_VERY_SMOOTH) / sizeof(BATTERY_LEVEL_CURVE_VERY_SMOOTH[0]) ==
-        BATTERY_LEVEL_CURVE_POINT_COUNT,
-    "Battery discharge profiles must have the same number of points"
-);
-static_assert(
-    sizeof(BATTERY_LEVEL_CURVE_SHARP) / sizeof(BATTERY_LEVEL_CURVE_SHARP[0]) == BATTERY_LEVEL_CURVE_POINT_COUNT,
+    sizeof(BATTERY_CURVE_LEVELS[0]) / sizeof(BATTERY_CURVE_LEVELS[0][0]) == BATTERY_LEVEL_CURVE_POINT_COUNT,
     "Battery discharge profiles must have the same number of points"
 );
 } // namespace
@@ -122,7 +50,7 @@ Battery::Battery() :
     emptyVoltage(LILKA_DEFAULT_EMPTY_VOLTAGE),
     fullVoltage(LILKA_DEFAULT_FULL_VOLTAGE),
     fullLevelRawValue(0),
-    dischargeProfile(BatteryDischargeProfile::Smooth) {
+    dischargeProfile(BatteryDischargeProfile::Normal) {
 }
 
 void Battery::begin() {
@@ -143,8 +71,8 @@ void Battery::begin() {
     if (prefs.begin(BATTERY_NVS_NAMESPACE, true)) {
         savedFullLevelRawValue = prefs.getUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, 0);
         uint8_t savedProfile =
-            prefs.getUChar(BATTERY_NVS_DISCHARGE_PROFILE_KEY, static_cast<uint8_t>(BatteryDischargeProfile::Smooth));
-        if (savedProfile <= static_cast<uint8_t>(BatteryDischargeProfile::VerySmooth)) {
+            prefs.getUChar(BATTERY_NVS_DISCHARGE_PROFILE_KEY, static_cast<uint8_t>(BatteryDischargeProfile::Normal));
+        if (savedProfile <= static_cast<uint8_t>(BatteryDischargeProfile::SmoothEnds)) {
             dischargeProfile = static_cast<BatteryDischargeProfile>(savedProfile);
         }
         prefs.end();
@@ -203,8 +131,8 @@ BatteryDischargeProfile Battery::getDischargeProfile() const {
 }
 
 void Battery::setDischargeProfile(BatteryDischargeProfile profile) {
-    if (profile > BatteryDischargeProfile::VerySmooth) {
-        profile = BatteryDischargeProfile::Smooth;
+    if (profile > BatteryDischargeProfile::SmoothEnds) {
+        profile = BatteryDischargeProfile::Normal;
     }
     dischargeProfile = profile;
 #if LILKA_VERSION >= 2
@@ -283,21 +211,7 @@ float Battery::rawValueToVoltage(uint16_t value) const {
 }
 
 int Battery::levelFromVoltage(float voltage) const {
-    const BatteryCurvePoint* curve = BATTERY_LEVEL_CURVE_TYPICAL;
-    switch (dischargeProfile) {
-        case BatteryDischargeProfile::Smooth:
-            curve = BATTERY_LEVEL_CURVE_SMOOTH;
-            break;
-        case BatteryDischargeProfile::VerySmooth:
-            curve = BATTERY_LEVEL_CURVE_VERY_SMOOTH;
-            break;
-        case BatteryDischargeProfile::Sharp:
-            curve = BATTERY_LEVEL_CURVE_SHARP;
-            break;
-        case BatteryDischargeProfile::Typical:
-        default:
-            break;
-    }
+    const uint8_t* levels = BATTERY_CURVE_LEVELS[static_cast<uint8_t>(dischargeProfile)];
     const float defaultRange = LILKA_DEFAULT_FULL_VOLTAGE - LILKA_DEFAULT_EMPTY_VOLTAGE;
     const float configuredRange = fullVoltage - emptyVoltage;
 
@@ -305,22 +219,22 @@ int Battery::levelFromVoltage(float voltage) const {
         return emptyVoltage + (curveVoltage - LILKA_DEFAULT_EMPTY_VOLTAGE) * configuredRange / defaultRange;
     };
 
-    if (voltage >= scaleVoltage(curve[0].voltage)) {
-        return curve[0].level;
+    if (voltage >= scaleVoltage(BATTERY_CURVE_VOLTAGES[0])) {
+        return levels[0];
     }
 
     for (size_t i = 1; i < BATTERY_LEVEL_CURVE_POINT_COUNT; i++) {
-        float higherVoltage = scaleVoltage(curve[i - 1].voltage);
-        float lowerVoltage = scaleVoltage(curve[i].voltage);
+        float higherVoltage = scaleVoltage(BATTERY_CURVE_VOLTAGES[i - 1]);
+        float lowerVoltage = scaleVoltage(BATTERY_CURVE_VOLTAGES[i]);
         if (voltage >= lowerVoltage) {
             float range = higherVoltage - lowerVoltage;
             float position = (voltage - lowerVoltage) / range;
-            float level = curve[i].level + position * (curve[i - 1].level - curve[i].level);
+            float level = levels[i] + position * (levels[i - 1] - levels[i]);
             return ceilf(level - BATTERY_LEVEL_ROUNDING_EPSILON);
         }
     }
 
-    return curve[BATTERY_LEVEL_CURVE_POINT_COUNT - 1].level;
+    return levels[BATTERY_LEVEL_CURVE_POINT_COUNT - 1];
 }
 
 void Battery::setEmptyVoltage(float voltage) {
