@@ -1,5 +1,15 @@
 #include "sys.h"
 
+#if CONFIG_IDF_TARGET_ESP32S3
+#    include <esp_private/system_internal.h>
+#    include <soc/rtc_cntl_reg.h>
+#    include <soc/soc.h>
+#    include <soc/usb_serial_jtag_reg.h>
+#    if CONFIG_TINYUSB_ENABLED
+#        include <tusb.h>
+#    endif
+#endif
+
 namespace lilka {
 
 #define FOREACH_PARTITION()                                                                                          \
@@ -49,6 +59,33 @@ void Sys::print_partition_table() {
         );
         iterator = esp_partition_next(iterator);
     }
+}
+
+[[noreturn]] void Sys::restart() {
+#if CONFIG_IDF_TARGET_ESP32S3
+#    if CONFIG_TINYUSB_ENABLED
+    if (tud_inited()) {
+        tud_disconnect();
+    } else {
+        CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    }
+#    else
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+#    endif
+
+    // Give the host time to observe removal of either TinyUSB or hardware
+    // CDC/JTAG before the bootloader presents a USB device again.
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    CLEAR_PERI_REG_MASK(
+        RTC_CNTL_USB_CONF_REG, RTC_CNTL_SW_HW_USB_PHY_SEL | RTC_CNTL_SW_USB_PHY_SEL | RTC_CNTL_USB_PAD_ENABLE
+    );
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_PHY_SEL);
+    SET_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    esp_restart_noos_dig();
+#else
+    esp_restart();
+#endif
 }
 
 Sys sys;
