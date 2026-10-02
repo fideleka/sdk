@@ -265,9 +265,7 @@ void Menu::draw(Arduino_GFX* canvas) {
             canvas->setFont(FONT_10x20);
             canvas->setCursor(iconWidth, itemsY + screenI * itemHeight);
             canvas->setTextBound(iconWidth, itemsY + screenI * itemHeight - 20, widthAvailable, itemHeight);
-            if (cursor != i) {
-                canvas->setTextColor(items[i].color);
-            }
+            canvas->setTextColor(cursor == i ? this->color : items[i].color);
             canvas->println(items[i].title);
         }
     }
