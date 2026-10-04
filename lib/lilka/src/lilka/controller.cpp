@@ -4,6 +4,7 @@
 
 #include "serial.h"
 #include "controller.h"
+#include "audio.h"
 
 namespace lilka {
 
@@ -39,69 +40,86 @@ Controller::Controller() : state{}, semaphore(xSemaphoreCreateRecursiveMutex()) 
     clearHandlers();
 }
 
+int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
+    AcquireController acquire(semaphore);
+    // Debounce a complete physical snapshot BEFORE chord arbitration or dispatch.
+    // Visible state cannot serve as physical history: consumed buttons stay invisible.
+    for (int i = 0; i < Button::ANY; ++i) {
+        const uint16_t bit = 1 << i;
+        if (now - physicalTime[i] >= LILKA_DEBOUNCE_TIME && ((rawPressed ^ physicalPressed) & bit)) {
+            physicalPressed ^= bit;
+            physicalTime[i] = now;
+        }
+    }
+    // A raw Start press wins even during its debounce window. A raw Select
+    // release stops adjustments immediately, without changing normal Select events.
+    uint16_t shortcutPressed = physicalPressed | (rawPressed & (1 << START));
+    if (!(rawPressed & (1 << SELECT))) shortcutPressed &= ~(1 << SELECT);
+    auto adjustment = shortcuts.scan(shortcutPressed, now, systemShortcutsEnabled);
+    _StateButtons& buttons = *reinterpret_cast<_StateButtons*>(&state);
+    state.any.pressed = false;
+    uint16_t changed = 0;
+    for (int i = 0; i < Button::ANY; ++i) {
+        ButtonState& button = buttons[i];
+        if (adjustment.suppressed & (1 << i)) {
+            button.pressed = false;
+            button.justPressed = false;
+            button.justReleased = false;
+            button.nextRepeatTime = 0;
+            continue;
+        }
+        const bool pressed = physicalPressed & (1 << i);
+        const bool shouldRepeat = pressed && button.nextRepeatTime && now >= button.nextRepeatTime;
+        if (pressed != button.pressed || shouldRepeat) {
+            button.pressed = pressed;
+            button.justPressed = pressed;
+            button.justReleased = !pressed;
+            state.any.justPressed = state.any.justPressed || pressed;
+            state.any.justReleased = state.any.justReleased || !pressed;
+            changed |= 1 << i;
+            button.time = now;
+        }
+        state.any.pressed = state.any.pressed || pressed;
+        if (pressed && button.repeatRate && button.repeatDelay) {
+            if (button.nextRepeatTime == 0) {
+                button.nextRepeatTime = now + button.repeatDelay;
+            } else if (shouldRepeat) {
+                button.nextRepeatTime += 1000 / button.repeatRate;
+            }
+        } else if (!pressed) {
+            button.nextRepeatTime = 0;
+        }
+    }
+    // Publish the complete visible snapshot before callbacks. A handler that peeks
+    // Select/Start must not see a half-dispatched simultaneous scan.
+    for (int i = 0; i < Button::ANY; ++i) {
+        if (!(changed & (1 << i))) continue;
+        const bool pressed = physicalPressed & (1 << i);
+        if (handlers[i] != NULL) handlers[i](pressed);
+        if (globalHandler != NULL) globalHandler((Button)i, pressed);
+    }
+    // Brightness chords remain ordinary: v2 has no independent backlight
+    // control: GPIO46 also shuts down MAX98357. Never PWM that shared sleep line.
+    return adjustment.volumeSteps * 5;
+}
+
 void Controller::inputTask() {
     while (1) {
-        {
-            AcquireController acquire(semaphore);
-            for (int i = 0; i < Button::COUNT; i++) {
-                if (i == Button::ANY) {
-                    // Skip "any" key since its state is computed from other keys
-                    continue;
-                }
-                _StateButtons& buttons = *reinterpret_cast<_StateButtons*>(&state);
-                ButtonState* buttonState = &buttons[i];
-                if (pins[i] < 0) {
-                    continue;
-                }
-                if (millis() - buttonState->time < LILKA_DEBOUNCE_TIME) {
-                    continue;
-                }
-
-                // Is the button being held down?
-                bool pressed = !digitalRead(pins[i]);
-                // Should the button repeat right now?
-                bool shouldRepeat = buttonState->nextRepeatTime && millis() >= buttonState->nextRepeatTime;
-
-                // Make/break
-                if (pressed != buttonState->pressed || shouldRepeat) {
-                    buttonState->pressed = pressed;
-                    buttonState->justPressed = pressed;
-                    buttonState->justReleased = !pressed;
-                    state.any.pressed = pressed;
-                    state.any.justPressed = state.any.justPressed || pressed;
-                    state.any.justReleased = state.any.justReleased || !pressed;
-                    if (handlers[i] != NULL) {
-                        handlers[i](pressed);
-                    }
-                    if (globalHandler != NULL) {
-                        globalHandler((Button)i, pressed);
-                    }
-                    buttonState->time = millis();
-                }
-
-                // Calculate repeats
-                if (pressed) {
-                    // Button is being held down, check if we need to repeat
-                    if (buttonState->repeatRate && buttonState->repeatDelay) {
-                        // Repeat is enabled, set next repeat time
-                        if (buttonState->nextRepeatTime == 0) {
-                            // This is the first repeat, delay by repeatDelay
-                            buttonState->nextRepeatTime = millis() + buttonState->repeatDelay;
-                        } else if (millis() >= buttonState->nextRepeatTime) {
-                            // Delay subsequent repeats by 1/repeatRate seconds
-                            buttonState->nextRepeatTime += 1000 / buttonState->repeatRate;
-                        }
-                    }
-                } else {
-                    // Button is not being held down, reset repeat
-                    buttonState->nextRepeatTime = 0;
-                }
-            }
+        uint16_t rawPressed = 0;
+        for (int i = 0; i < Button::ANY; ++i) {
+            if (pins[i] >= 0 && !digitalRead(pins[i])) rawPressed |= 1 << i;
         }
-
-        // Sleep for 5ms
+        const int volumeDelta = scanInputs(rawPressed, millis());
+        // Atomic RAM-only update, outside controller mutex. Persistence is serviced
+        // on the audio settings task, never in this scan or an application callback.
+        if (volumeDelta) audio.changeVolumeLive(volumeDelta);
         vTaskDelay(5 / portTICK_PERIOD_MS);
     }
+}
+
+void Controller::setSystemShortcutsEnabled(bool enabled) {
+    AcquireController acquire(semaphore);
+    systemShortcutsEnabled = enabled;
 }
 
 void Controller::resetState() {

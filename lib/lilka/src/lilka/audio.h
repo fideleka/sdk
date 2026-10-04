@@ -34,10 +34,16 @@ public:
     static int getVolume();
     /// Встановлює рівень гучності
     static void setVolume(int level);
+    /// RAM-only bounded relative adjustment (0..100, including mute).
+    /// Initialized by begin(); persisted after 600ms without a change.
+    static void changeVolumeLive(int delta);
     /// Перевіряє чи увімкнено звук вітання
     static uint32_t getStartupSoundEnabled();
     /// Вмикає чи вимикає звук вітання
     static void setStartupSoundEnabled(bool enable);
+
+private:
+    static void serviceVolumePersistence();
 };
 
 extern Audio audio;

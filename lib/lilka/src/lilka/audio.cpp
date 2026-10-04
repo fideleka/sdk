@@ -3,8 +3,25 @@
 #include "ping.h"
 #include "Preferences.h"
 #include "serial.h"
+#include <atomic>
+#include <freertos/semphr.h>
 
 namespace lilka {
+namespace {
+std::atomic<int> liveVolume{LILKA_SOUND_NVS_DEFAULT_VOLUME};
+std::atomic<bool> volumeLoaded{false};
+portMUX_TYPE volumeMux = portMUX_INITIALIZER_UNLOCKED;
+uint32_t volumeRevision = 0;
+uint32_t volumeChangedAt = 0;
+uint32_t savedVolumeRevision = 0; // protected by settingsMutex
+uint32_t volumeRetryAt = 0;
+bool volumeSaveFailed = false;
+
+SemaphoreHandle_t settingsMutex() {
+    static SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
+    return mutex;
+}
+} // namespace
 
 Audio::Audio() {
 }
@@ -16,14 +33,13 @@ void welcomePlay(void* arg) {
 #elif LILKA_VERSION == 2
     // Signed 16-bit PCM
     const int16_t* ping = reinterpret_cast<const int16_t*>(ping_raw);
-    auto volumeLevel = audio.getVolume();
     vTaskDelay(400 / portTICK_PERIOD_MS);
 
     int16_t buf;
     I2S.begin(I2S_PHILIPS_MODE, 22050, 16);
     for (int i = 0; i < ping_raw_size / 2; i++) {
         memcpy(&buf, &ping[i], 2);
-        lilka::audio.adjustVolume(&buf, 2, 16, volumeLevel);
+        lilka::audio.adjustVolume(&buf, 2, 16, audio.getVolume());
 
         I2S.write(buf >> 2);
         I2S.write(buf >> 2);
@@ -35,6 +51,19 @@ void welcomePlay(void* arg) {
 }
 
 void Audio::begin() {
+    getVolume(); // One NVS read before input and audio tasks start.
+    static TaskHandle_t settingsTask = nullptr;
+    if (!settingsTask) {
+        xTaskCreate(
+            [](void*) {
+                while (1) {
+                    Audio::serviceVolumePersistence();
+                    vTaskDelay(pdMS_TO_TICKS(50));
+                }
+            },
+            "audioSettings", 2048, nullptr, 1, &settingsTask
+        );
+    }
     initPins();
 
     I2S.setAllPins(LILKA_I2S_BCLK, LILKA_I2S_LRCK, LILKA_I2S_DOUT, LILKA_I2S_DOUT, -1);
@@ -84,33 +113,89 @@ void Audio::adjustVolume(void* buffer, size_t size, int bitsPerSample, uint32_t 
         int32_t* smp = static_cast<int32_t*>(buffer);
 
         for (int i = 0; i < samples; i++) {
-            *smp = (*smp * gain) >> 10;
+            *smp = (static_cast<int64_t>(*smp) * gain) >> 10;
             smp++;
         }
     }
 }
 
-// Getters/setters to work with NVS directly
-// Single storage, less chance to create stupid problems with synchronising it's data
+// Existing setter remains an immediate persistent write using the same key/type.
+// Once loaded, playback getters only read RAM, never NVS.
 int Audio::getVolume() {
-    Preferences prefs;
-
-    prefs.begin(LILKA_SOUND_NVS_NAMESPACE, true);
-
-    uint32_t volume = prefs.getUInt(LILKA_SOUND_NVS_VOLUME_LEVEL_KEY, LILKA_SOUND_NVS_DEFAULT_VOLUME);
-
-    prefs.end();
-    return volume;
+    if (!volumeLoaded.load()) {
+        xSemaphoreTake(settingsMutex(), portMAX_DELAY);
+        if (!volumeLoaded.load()) {
+            Preferences prefs;
+            prefs.begin(LILKA_SOUND_NVS_NAMESPACE, true);
+            liveVolume.store(prefs.getUInt(LILKA_SOUND_NVS_VOLUME_LEVEL_KEY, LILKA_SOUND_NVS_DEFAULT_VOLUME));
+            prefs.end();
+            volumeLoaded.store(true);
+        }
+        xSemaphoreGive(settingsMutex());
+    }
+    return liveVolume.load();
 }
 
 void Audio::setVolume(int level) {
+    xSemaphoreTake(settingsMutex(), portMAX_DELAY);
+    portENTER_CRITICAL(&volumeMux);
+    const uint32_t revision = ++volumeRevision;
+    liveVolume.store(level);
+    volumeLoaded.store(true);
+    portEXIT_CRITICAL(&volumeMux);
     Preferences prefs;
-
     prefs.begin(LILKA_SOUND_NVS_NAMESPACE, false);
-
-    prefs.putUInt(LILKA_SOUND_NVS_VOLUME_LEVEL_KEY, level);
-
+    const bool saved = prefs.putUInt(LILKA_SOUND_NVS_VOLUME_LEVEL_KEY, level) != 0;
     prefs.end();
+    if (saved) {
+        savedVolumeRevision = revision;
+        volumeSaveFailed = false;
+    }
+    xSemaphoreGive(settingsMutex());
+}
+
+void Audio::changeVolumeLive(int delta) {
+    const uint32_t now = millis();
+    // Bounded RAM-only critical section: value, timestamp and revision form one
+    // snapshot. No mutex wait, allocation, callback or NVS operation here.
+    portENTER_CRITICAL(&volumeMux);
+    const int old = liveVolume.load();
+    const int bounded = old < 0 ? 0 : (old > 100 ? 100 : old);
+    const int64_t requested = static_cast<int64_t>(bounded) + delta;
+    const int next = requested < 0 ? 0 : (requested > 100 ? 100 : static_cast<int>(requested));
+    if (next != old) {
+        liveVolume.store(next);
+        volumeChangedAt = now;
+        ++volumeRevision;
+    }
+    portEXIT_CRITICAL(&volumeMux);
+}
+
+void Audio::serviceVolumePersistence() {
+    // Runs on its own task; serializes with public setters, NOT controller scans.
+    xSemaphoreTake(settingsMutex(), portMAX_DELAY);
+    portENTER_CRITICAL(&volumeMux);
+    const uint32_t revision = volumeRevision;
+    const uint32_t changedAt = volumeChangedAt;
+    const int level = liveVolume.load();
+    portEXIT_CRITICAL(&volumeMux);
+    const uint32_t now = millis();
+    const bool retryReady = !volumeSaveFailed || static_cast<int32_t>(now - volumeRetryAt) >= 0;
+    if (retryReady && revision != savedVolumeRevision && now - changedAt >= 600) {
+        Preferences prefs;
+        prefs.begin(LILKA_SOUND_NVS_NAMESPACE, false);
+        const bool saved = prefs.putUInt(LILKA_SOUND_NVS_VOLUME_LEVEL_KEY, level) != 0;
+        prefs.end();
+        // A concurrent RAM adjustment gets a later revision and remains dirty.
+        if (saved) {
+            savedVolumeRevision = revision;
+            volumeSaveFailed = false;
+        } else {
+            volumeSaveFailed = true;
+            volumeRetryAt = now + 1000;
+        }
+    }
+    xSemaphoreGive(settingsMutex());
 }
 
 uint32_t Audio::getStartupSoundEnabled() {

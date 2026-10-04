@@ -1,0 +1,33 @@
+#!/usr/bin/env python3
+"""Compile real SDK controller/audio sources against bounded host hardware/NVS stubs."""
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = ROOT / "lib/lilka/src/lilka"
+TEST = ROOT / "tests/system_shortcuts"
+with tempfile.TemporaryDirectory(prefix="lilka-shortcuts-") as directory:
+    tmp = Path(directory)
+    for name in ("controller.cpp", "controller.h", "audio.cpp", "audio.h", "config.h", "system_shortcuts.h"):
+        (tmp / name).write_text((SOURCE / name).read_text())
+    for name in ("Arduino.h", "I2S.h", "Preferences.h", "serial.h", "driver/uart.h",
+                 "freertos/FreeRTOS.h", "freertos/semphr.h"):
+        path = tmp / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('''#pragma once
+#include "host.h"
+''')
+    (tmp / "ping.h").write_text('''#pragma once
+const uint8_t ping_raw[2] = {};
+const int ping_raw_size = 2;
+''')
+    for sanitize in (False, True):
+        flags = ["-fsanitize=address,undefined", "-fno-pie", "-no-pie"] if sanitize else []
+        command = [os.environ.get("CXX", "g++"), "-std=c++11", "-DLILKA_VERSION=2", "-DLILKA_NO_AUDIO_HELLO",
+                   "-Wall", "-Wextra", "-Wno-reorder", "-Wno-unused-parameter", *flags,
+                   "-I" + str(tmp), "-I" + str(TEST), str(tmp / "controller.cpp"),
+                   str(tmp / "audio.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
+        subprocess.run(command, check=True)
+        subprocess.run([str(tmp / "regression")], check=True)
