@@ -4,7 +4,8 @@ The controller initialized by lilka::begin() enables these shortcuts automatical
 no application callback is installed or replaced. Applications can opt out with
 lilka::controller.setSystemShortcutsEnabled(false).
 
-- Hold **Select first**, then press **Up / Down** for volume +5 / -5 percentage points.
+- Hold **Select first**, then press **Up / Down**. Up uses +1 below 5, then +5:
+  0→1→2→3→4→5→10→15. Down remains -5, clamped at mute.
 - One immediate step; first repeat at 400 ms, then every 100 ms. This timing is
   independent of application auto-repeat and emulator per-axis precision delays.
 - Volume clamps to 0..100, including actual mute. Opposite simultaneous directions
@@ -31,10 +32,38 @@ line would also gate the MAX98357 amplifier; this implementation deliberately do
 not invent incompatible PWM, a fake brightness value, or an NVS key. The lower-bound
 requirement cannot be implemented as physical dimming with this hardware interface.
 A separately controllable backlight (and board-qualified safe minimum) is needed.
-The shared sleep/power-saving API and display drawing are untouched.
+The shared sleep/power-saving API is untouched.
 
-There is no universal task-safe display compositing hook, so no overlay is drawn
-from the controller or settings tasks.
+## Render-owned centered volume overlay
+
+Audio::stepVolumeShortcut(direction) is the additive shortcut API; positive and
+negative direction perform the steps above, zero does nothing. Public
+changeVolumeLive(delta) retains exact bounded delta semantics (including +5 from
+mute). Step calculation and value/snapshot updates share one RAM critical section,
+so a concurrent setter cannot split the gentle-step decision from its update.
+Every nonzero shortcut adjustment, even at 0/100, publishes a coherent
+VolumeOverlaySnapshot; limit feedback does not dirty NVS or prolong its save timer.
+Audio::getVolumeOverlay() reads only RAM. Its visible(now) expires 1200ms after the
+last shortcut step and handles unsigned millis wrap. Cancellation does not renew it.
+
+volume_overlay.h exposes reusable geometry and drawVolumeOverlay(target, snapshot,
+width, height, now). The panel is centered, 75% of display width and 76px high; its
+white border, black background, cyan 22px bar and 12x20px percent/MUTE glyphs are
+rotation-independent. Targets smaller than 96x80 are omitted. Existing rectangle
+primitives are reused, with no allocations or font/cursor mutations.
+
+Display::drawCanvas automatically draws feedback after complete-screen canvases
+only. Source canvases are never modified. Keep presenting complete frames while
+feedback is visible and for its expiry frame to restore underlying content.
+Display::presentCanvas presents a canvas without feedback for multi-layer owners;
+Display::drawSystemOverlay draws it after all underlying layers are restored.
+There is no universal task-safe composition/event hook: partial canvases,
+drawCanvasInterlaced, raw bitmaps/writePixels, direct drawing, and SDK applications
+that stop presenting while paused are not automatically covered. Their single
+render owner must schedule presentation and restoration explicitly, using the
+snapshot/API. Do not call drawing APIs from controller/audio/settings tasks or add
+another SPI-writing task. Matching Keira AppManager implements this scheduler for
+menus, NES/GB/GBC, framebuffer apps and paused screens; see its integration docs.
 
 ## Audio and persistence
 
@@ -54,7 +83,7 @@ public setter supersedes a pending save unless a later RAM change occurs.
 Immediate power loss before the settling save can lose the most recent adjustment.
 
 The controller scans ten GPIOs every 5 ms, arbitrates one complete debounced
-snapshot, and applies the RAM delta after releasing its controller mutex. It does
+snapshot, and applies the shortcut step after releasing its controller mutex. It does
 not allocate, read NVS, or write NVS during adjustment scanning. Existing application
 callbacks remain synchronous as before; applications must avoid heavy work there.
 SDK startup PCM rereads RAM volume, and 32-bit scaling uses a widened product to
@@ -65,8 +94,12 @@ for NES, Game Boy, tracker and AudioPlayer output.
 
 ## Source-only regression
 
-Run python3 tests/system_shortcuts/run.py (C++11 normal and ASan/UBSan) and
+Run python3 tests/system_shortcuts/run.py (C++11 normal and ASan/UBSan, including
+gentle taps/holds, bounds, descending, opposite cancellation and timeout/wrap) and
 python3 tests/menu/run.py --sanitize. Binaries and source mocks live only in a
-temporary host directory. No PlatformIO, dependency resolution, firmware build,
+temporary host directory. Matching Keira tests/volume_overlay.py executes SDK
+presentation and Keira render paths under pixel stubs, including centered geometry,
+bar fractions, source immutability and clean expiry/screenshot restoration.
+No PlatformIO, dependency resolution, firmware build,
 flash, ROM/save write, or cache creation is involved. Hardware audio, task-stack
 headroom, persistence across reboot and release readiness remain device/build gates.

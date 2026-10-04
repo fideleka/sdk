@@ -36,7 +36,7 @@ int scan(Controller& controller, uint16_t mask, uint32_t now) {
     const int delta = controller.scanInputs(mask, now);
     // Mirrors production inputTask: mutex is already released before RAM adjustment.
     assert(hostLocks[controller.semaphore] == 0);
-    if (delta) audio.changeVolumeLive(delta);
+    if (delta) audio.stepVolumeShortcut(delta);
     hostHotScan = false;
     return delta;
 }
@@ -187,6 +187,65 @@ void ordinaryTests() {
     }
     puts("ordinary controls/polling flags/peek/reset/auto-repeat/callbacks PASS");
 }
+void gentleShortcutTests() {
+    for (bool held : {false, true}) {
+        audio.setVolume(0);
+        hostWrites = 0;
+        Controller c;
+        scan(c, S, 2000);
+        assert(scan(c, S | 1, 2020) == 5 && audio.getVolume() == 1);
+        const int expected[] = {2, 3, 4, 5, 10, 15};
+        uint32_t now = 2420;
+        for (int level : expected) {
+            if (!held) { scan(c, S, now - 20); }
+            assert(scan(c, S | 1, now) == 5);
+            assert(audio.getVolume() == level);
+            assert(audio.getVolumeOverlay().adjustedAt == now);
+            now += held ? 100 : 40;
+        }
+        assert(hostWrites == 0);
+    }
+    for (int level = 0; level < 5; ++level) {
+        audio.setVolume(level);
+        audio.stepVolumeShortcut(1);
+        assert(audio.getVolume() == level + 1);
+    }
+    for (int level : {0, 1, 2, 3, 4, 5, 10, 100}) {
+        audio.setVolume(level);
+        audio.stepVolumeShortcut(-1);
+        assert(audio.getVolume() == (level < 5 ? 0 : level - 5));
+    }
+    audio.setVolume(100);
+    hostWrites = 0;
+    hostNow = 10000;
+    audio.stepVolumeShortcut(1);
+    auto feedback = audio.getVolumeOverlay();
+    assert(audio.getVolume() == 100 && feedback.level == 100 && feedback.visible(11199));
+    assert(!feedback.visible(11200));
+    hostNow = 11000;
+    audio.stepVolumeShortcut(1);
+    assert(audio.getVolumeOverlay().visible(12199));
+    assert(!audio.getVolumeOverlay().visible(12200));
+    audio.serviceVolumePersistence();
+    assert(hostWrites == 0); // Limit feedback does not dirty NVS.
+    audio.setVolume(0);
+    hostNow = UINT32_MAX - 100;
+    audio.stepVolumeShortcut(-1);
+    feedback = audio.getVolumeOverlay();
+    assert(feedback.level == 0 && feedback.visible(1098) && !feedback.visible(1099));
+    audio.stepVolumeShortcut(0);
+    assert(audio.getVolumeOverlay().adjustedAt == feedback.adjustedAt);
+    Controller opposite;
+    scan(opposite, S, 13000);
+    scan(opposite, S | 3, 13020);
+    assert(audio.getVolume() == 0 && audio.getVolumeOverlay().adjustedAt == feedback.adjustedAt);
+    // Public additive API remains +5 from mute, not shortcut-specific +1.
+    audio.changeVolumeLive(5);
+    assert(audio.getVolume() == 5);
+    assert(audio.getVolumeOverlay().adjustedAt == feedback.adjustedAt);
+    puts("gentle taps/held repeats/descending/saturation/cancellation/feedback renewal+wrap PASS");
+}
+
 void persistenceTests() {
     hostNow = 5000;
     audio.setVolume(50);
@@ -275,6 +334,7 @@ int main() {
     assert(hostTaskCount == 1);
     chordTests();
     ordinaryTests();
+    gentleShortcutTests();
     persistenceTests();
     assert(hostReads == 1);
     puts("real Controller + Audio host regression PASS");

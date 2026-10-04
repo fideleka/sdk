@@ -16,6 +16,7 @@ uint32_t volumeChangedAt = 0;
 uint32_t savedVolumeRevision = 0; // protected by settingsMutex
 uint32_t volumeRetryAt = 0;
 bool volumeSaveFailed = false;
+VolumeOverlaySnapshot volumeOverlay;
 
 SemaphoreHandle_t settingsMutex() {
     static SemaphoreHandle_t mutex = xSemaphoreCreateMutex();
@@ -154,13 +155,15 @@ void Audio::setVolume(int level) {
     xSemaphoreGive(settingsMutex());
 }
 
-void Audio::changeVolumeLive(int delta) {
+namespace {
+void adjustLiveVolume(int delta, bool shortcut) {
     const uint32_t now = millis();
     // Bounded RAM-only critical section: value, timestamp and revision form one
     // snapshot. No mutex wait, allocation, callback or NVS operation here.
     portENTER_CRITICAL(&volumeMux);
     const int old = liveVolume.load();
     const int bounded = old < 0 ? 0 : (old > 100 ? 100 : old);
+    if (shortcut) delta = delta > 0 ? (bounded < 5 ? 1 : 5) : -5;
     const int64_t requested = static_cast<int64_t>(bounded) + delta;
     const int next = requested < 0 ? 0 : (requested > 100 ? 100 : static_cast<int>(requested));
     if (next != old) {
@@ -168,7 +171,28 @@ void Audio::changeVolumeLive(int delta) {
         volumeChangedAt = now;
         ++volumeRevision;
     }
+    if (shortcut) {
+        volumeOverlay.level = next;
+        volumeOverlay.adjustedAt = now;
+        volumeOverlay.valid = true;
+    }
     portEXIT_CRITICAL(&volumeMux);
+}
+} // namespace
+
+void Audio::changeVolumeLive(int delta) {
+    adjustLiveVolume(delta, false);
+}
+
+void Audio::stepVolumeShortcut(int direction) {
+    if (direction) adjustLiveVolume(direction, true);
+}
+
+VolumeOverlaySnapshot Audio::getVolumeOverlay() {
+    portENTER_CRITICAL(&volumeMux);
+    const auto snapshot = volumeOverlay;
+    portEXIT_CRITICAL(&volumeMux);
+    return snapshot;
 }
 
 void Audio::serviceVolumePersistence() {

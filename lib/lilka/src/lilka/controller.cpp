@@ -112,7 +112,7 @@ void Controller::inputTask() {
         const int volumeDelta = scanInputs(rawPressed, millis());
         // Atomic RAM-only update, outside controller mutex. Persistence is serviced
         // on the audio settings task, never in this scan or an application callback.
-        if (volumeDelta) audio.changeVolumeLive(volumeDelta);
+        if (volumeDelta) audio.stepVolumeShortcut(volumeDelta);
         vTaskDelay(5 / portTICK_PERIOD_MS);
     }
 }

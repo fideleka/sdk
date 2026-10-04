@@ -5,6 +5,7 @@
 #include "serial.h"
 #include "fmath.h"
 #include "buzzer.h"
+#include "audio.h"
 
 namespace lilka {
 
@@ -230,6 +231,21 @@ void Display::draw16bitRGBBitmapWithTranColor(
 
 uint8_t* Display::getFont() {
     return u8g2Font;
+}
+
+void Display::presentCanvas(Canvas* canvas) {
+    GFX<Display>::drawCanvas(canvas);
+}
+
+void Display::drawCanvas(Canvas* canvas) {
+    presentCanvas(canvas);
+    if (canvas->x() == 0 && canvas->y() == 0 && canvas->width() == width() && canvas->height() == height()) {
+        drawSystemOverlay();
+    }
+}
+
+void Display::drawSystemOverlay() {
+    drawVolumeOverlay(*this, audio.getVolumeOverlay(), width(), height(), millis());
 }
 
 void Display::drawCanvasInterlaced(Canvas* canvas, bool odd) {

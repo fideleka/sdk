@@ -1,6 +1,7 @@
 #pragma once
 
 #include <I2S.h>
+#include "volume_overlay.h"
 
 #define LILKA_SOUND_NVS_NAMESPACE             "sound"
 #define LILKA_SOUND_NVS_VOLUME_LEVEL_KEY      "volumeLevel"
@@ -37,6 +38,11 @@ public:
     /// RAM-only bounded relative adjustment (0..100, including mute).
     /// Initialized by begin(); persisted after 600ms without a change.
     static void changeVolumeLive(int delta);
+    /// Shortcut-only step: +1 below 5, otherwise +5; down is -5. Zero cancels.
+    /// Every nonzero step renews presentation feedback, including at limits.
+    static void stepVolumeShortcut(int direction);
+    /// RAM-only coherent snapshot for a renderer; never performs display I/O.
+    static VolumeOverlaySnapshot getVolumeOverlay();
     /// Перевіряє чи увімкнено звук вітання
     static uint32_t getStartupSoundEnabled();
     /// Вмикає чи вимикає звук вітання

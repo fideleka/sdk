@@ -276,6 +276,13 @@ public:
     );
     uint8_t* getFont();
     void drawCanvasInterlaced(Canvas* canvas, bool odd);
+    /// Present a canvas; automatic overlay only for complete screen frames.
+    /// Caller owns display serialization and must keep presenting for expiry.
+    void drawCanvas(Canvas* canvas);
+    /// Present without automatic overlay (for multi-layer renderers).
+    void presentCanvas(Canvas* canvas);
+    /// Draw feedback from the render owner after restoring all underlying layers.
+    void drawSystemOverlay();
 
 private:
     const void* splash;
