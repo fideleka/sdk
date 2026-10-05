@@ -1,6 +1,9 @@
 #pragma once
 
 #include <stdint.h>
+#include <stddef.h>
+#include <type_traits>
+#include <u8g2.h>
 
 namespace lilka {
 
@@ -47,8 +50,38 @@ struct VolumeOverlayRow {
     }
 };
 
+/// Private decoder and RAM-only callback, independent of application GFX state.
+/// The first-member cast avoids requiring U8X8_WITH_USER_PTR on embedded builds.
+template <typename Target>
+struct VolumeOverlayFontTarget {
+    u8g2_t decoder;
+    Target* target;
+    static void line(u8g2_t* decoder, u8g2_uint_t x, u8g2_uint_t y, u8g2_uint_t length, uint8_t direction) {
+        using Context = VolumeOverlayFontTarget<Target>;
+        static_assert(
+            std::is_standard_layout<Context>::value && offsetof(Context, decoder) == 0, "Decoder must be first"
+        );
+        auto* context = reinterpret_cast<Context*>(decoder);
+        context->target->fillRect(x, y, direction ? 1 : length, direction ? length : 1, 0xffff);
+    }
+};
+
+template <typename Target>
+void volumeOverlayFontWindow(u8g2_t& decoder, const Target&, const VolumeOverlayGeometry& g) {
+    decoder.user_x0 = g.x;
+    decoder.user_x1 = g.x + g.width;
+    decoder.user_y0 = g.y + 12;
+    decoder.user_y1 = g.y + 32;
+}
+
+inline void volumeOverlayFontWindow(u8g2_t& decoder, const VolumeOverlayRow& row, const VolumeOverlayGeometry& g) {
+    volumeOverlayFontWindow<VolumeOverlayRow>(decoder, row, g);
+    decoder.user_y0 = row.y;
+    decoder.user_y1 = row.y + 1;
+}
+
 /// Draw on an off-screen presentation target, never an application's source canvas.
-/// Uses existing rectangle primitives, no allocation or changes to font/cursor state.
+/// Uses the regular SDK FONT_10x20 asset unscaled; no heap or font/cursor mutations.
 template <typename Target>
 void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int width, int height, uint32_t now) {
     if (!state.visible(now)) return;
@@ -62,47 +95,41 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     const int level = state.level < 0 ? 0 : (state.level > 100 ? 100 : state.level);
     const int filled = (g.barWidth - 4) * level / 100;
     if (filled) target.fillRect(g.barX + 2, g.barY + 2, filled, g.barHeight - 4, cyan);
-    // Compact 3x5 font at 4x scale: legible 12x20 glyphs. Alphabet: 0..9,%,M,U,T,E.
-    static const uint16_t glyphs[] = {
-        0x7b6f,
-        0x2492,
-        0x73e7,
-        0x73cf,
-        0x5bc9,
-        0x79cf,
-        0x79ef,
-        0x7249,
-        0x7bef,
-        0x7bcf,
-        0x52a5,
-        0x5fed,
-        0x5b6f,
-        0x7492,
-        0x79e7
-    };
-    int text[4], count = 0;
+    char text[5] = {};
+    int count = 0;
     if (!level) {
-        text[0] = 11;
-        text[1] = 12;
-        text[2] = 13;
-        text[3] = 14;
+        text[0] = 'M';
+        text[1] = 'U';
+        text[2] = 'T';
+        text[3] = 'E';
         count = 4;
     } else {
-        if (level == 100) text[count++] = 1;
-        if (level >= 10) text[count++] = (level / 10) % 10;
-        text[count++] = level % 10;
-        text[count++] = 10;
+        if (level == 100) text[count++] = '1';
+        if (level >= 10) text[count++] = '0' + (level / 10) % 10;
+        text[count++] = '0' + level % 10;
+        text[count++] = '%';
     }
-    const int startX = g.x + (g.width - (count * 16 - 4)) / 2;
-    for (int i = 0; i < count; ++i) {
-        for (int row = 0; row < 5; ++row) {
-            for (int col = 0; col < 3; ++col) {
-                if (glyphs[text[i]] & (1 << (14 - row * 3 - col))) {
-                    target.fillRect(startX + i * 16 + col * 4, g.y + 12 + row * 4, 4, 4, white);
-                }
-            }
-        }
-    }
+    VolumeOverlayFontTarget<Target> context{};
+    context.target = &target;
+    auto& decoder = context.decoder;
+    static const u8g2_cb_t callbacks = {nullptr, nullptr, VolumeOverlayFontTarget<Target>::line};
+    decoder.cb = &callbacks;
+    volumeOverlayFontWindow(decoder, target, g);
+    // Only the text band needs font decoding during scanline presentation.
+    if (decoder.user_y1 <= g.y + 12 || decoder.user_y0 >= g.y + 32) return;
+#ifdef U8G2_WITH_CLIP_WINDOW_SUPPORT
+    decoder.is_page_clip_window_intersection = 1;
+#endif
+    decoder.draw_color = 1;
+    u8g2_SetFont(&decoder, u8g2_font_10x20_t_cyrillic);
+    u8g2_SetFontMode(&decoder, 1);
+    u8g2_SetFontPosBaseline(&decoder);
+    int advance = 0;
+    for (int i = 0; i < count; ++i)
+        advance += u8g2_GetGlyphWidth(&decoder, text[i]);
+    int x = g.x + (g.width - advance) / 2;
+    for (int i = 0; i < count; ++i)
+        x += u8g2_DrawGlyph(&decoder, x, g.y + 32, text[i]);
 }
 
 } // namespace lilka

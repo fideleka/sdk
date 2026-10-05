@@ -48,9 +48,14 @@ last shortcut step and handles unsigned millis wrap. Cancellation does not renew
 
 volume_overlay.h exposes reusable geometry and drawVolumeOverlay(target, snapshot,
 width, height, now). The panel is centered, 75% of display width and 76px high; its
-white border, black background, cyan 22px bar and 12x20px percent/MUTE glyphs are
-rotation-independent. Targets smaller than 96x80 are omitted. Existing rectangle
-primitives are reused, with no allocations or font/cursor mutations.
+white border, black background, cyan 22px bar and unscaled regular FONT_10x20 percent/MUTE text (10px advance) are
+rotation-independent. Targets smaller than 96x80 are omitted. A private stack-local U8g2 decoder uses the existing
+u8g2_font_10x20_t_cyrillic asset and a RAM-only span callback. Scanlines clip
+font work to their own row and skip it outside the 20px text band. There are
+no heap allocations, LCD font primitives or application font/cursor mutations.
+The decoder context is 248 bytes on the 64-bit test host; persistent overlay
+state remains unchanged. The existing 6979-byte asset is referenced, not copied.
+Embedded flash/stack deltas and device timing are not measured.
 
 Display::drawCanvas automatically protects feedback during complete-screen canvas
 presentation. Source canvases are never modified. Keep presenting complete frames
@@ -103,8 +108,12 @@ Run python3 tests/system_shortcuts/run.py (C++11 normal and ASan/UBSan, includin
 gentle taps/holds, bounds, descending, opposite cancellation and timeout/wrap) and
 python3 tests/menu/run.py --sanitize. Binaries and source mocks live only in a
 temporary host directory. Matching Keira tests/volume_overlay.py executes SDK
-presentation and Keira render paths under pixel stubs, including centered geometry,
+presentation and Keira render paths under pixel stubs with the real maintained
+U8g2 decoder and FONT_10x20 asset (normal, ASan and UBSan), including centered geometry,
 bar fractions, source immutability and clean expiry/screenshot restoration.
+Host tests use the existing read-only ../lilka-sdk/lib/lilka/.pio/libdeps/v2/U8g2/src/clib;
+set U8G2_CLIB (or Keira's --u8g2) to another existing clib directory if needed.
+No dependency download or .pio creation occurs.
 No PlatformIO, dependency resolution, firmware build,
 flash, ROM/save write, or cache creation is involved. Hardware audio, task-stack
 headroom, persistence across reboot and release readiness remain device/build gates.

@@ -8,6 +8,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "lib/lilka/src/lilka"
 TEST = ROOT / "tests/system_shortcuts"
+U8G2 = Path(os.environ.get("U8G2_CLIB", ROOT.parent / "lilka-sdk/lib/lilka/.pio/libdeps/v2/U8g2/src/clib"))
+assert (U8G2 / "u8g2.h").is_file(), "Set U8G2_CLIB to an existing read-only dependency directory"
 # Host scan helper must mirror the actual input task's post-mutex dispatch.
 assert "if (volumeDelta) audio.stepVolumeShortcut(volumeDelta);" in (SOURCE / "controller.cpp").read_text()
 assert "display" not in (SOURCE / "audio.cpp").read_text()
@@ -30,7 +32,7 @@ const int ping_raw_size = 2;
         flags = ["-fsanitize=address,undefined", "-fno-pie", "-no-pie"] if sanitize else []
         command = [os.environ.get("CXX", "g++"), "-std=c++11", "-DLILKA_VERSION=2", "-DLILKA_NO_AUDIO_HELLO",
                    "-Wall", "-Wextra", "-Wno-reorder", "-Wno-unused-parameter", *flags,
-                   "-I" + str(tmp), "-I" + str(TEST), str(tmp / "controller.cpp"),
+                   "-I" + str(tmp), "-I" + str(TEST), "-I" + str(U8G2), str(tmp / "controller.cpp"),
                    str(tmp / "audio.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
         subprocess.run(command, check=True)
         subprocess.run([str(tmp / "regression")], check=True)
