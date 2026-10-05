@@ -74,7 +74,9 @@ void volumeOverlayFontWindow(u8g2_t& decoder, const Target&, const VolumeOverlay
     decoder.user_x0 = g.x + 2;
     decoder.user_x1 = g.x + g.width - 2;
     decoder.user_y0 = g.y + 12;
-    decoder.user_y1 = g.y + 32;
+    // The baseline is not the bottom: native Cyrillic glyphs have descenders.
+    // Keep the text window above the unchanged bar, including those lower rows.
+    decoder.user_y1 = g.barY;
 }
 
 inline void volumeOverlayFontWindow(u8g2_t& decoder, const VolumeOverlayRow& row, const VolumeOverlayGeometry& g) {
@@ -133,7 +135,7 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     decoder.cb = &callbacks;
     volumeOverlayFontWindow(decoder, target, g);
     // Only the text band needs font decoding during scanline presentation.
-    if (decoder.user_y1 <= g.y + 12 || decoder.user_y0 >= g.y + 32) return;
+    if (decoder.user_y1 <= g.y + 12 || decoder.user_y0 >= g.barY) return;
 #ifdef U8G2_WITH_CLIP_WINDOW_SUPPORT
     decoder.is_page_clip_window_intersection = 1;
 #endif
