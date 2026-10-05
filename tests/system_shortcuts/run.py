@@ -36,3 +36,17 @@ const int ping_raw_size = 2;
                    str(tmp / "audio.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
         subprocess.run(command, check=True)
         subprocess.run([str(tmp / "regression")], check=True)
+        # Compile the installed U8g2 decoder and original font asset read-only.
+        # Section GC keeps unrelated font/UTF-8 entry points out of this host link.
+        objects = []
+        for name in ("u8g2_font.c", "u8g2_hvline.c", "u8g2_intersection.c", "u8g2_fonts.c"):
+            obj = tmp / (name + ".o")
+            subprocess.run([os.environ.get("CC", "gcc"), "-std=c99", *flags,
+                            "-ffunction-sections", "-fdata-sections", "-I" + str(U8G2),
+                            "-c", str(U8G2 / name), "-o", str(obj)], check=True)
+            objects.append(str(obj))
+        subprocess.run([os.environ.get("CXX", "g++"), "-std=c++11", "-Wall", "-Wextra", "-Werror",
+                        *flags, "-I" + str(tmp), "-I" + str(U8G2.parent),
+                        str(TEST / "overlay.cpp"), *objects, "-Wl,--gc-sections",
+                        "-o", str(tmp / "overlay")], check=True)
+        subprocess.run([str(tmp / "overlay")], check=True)

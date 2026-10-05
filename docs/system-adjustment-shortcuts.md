@@ -80,11 +80,22 @@ width, height, now). The panel is centered, 75% of display width and 76px high; 
 white border, black background, cyan 22px bar and unscaled regular FONT_10x20 percent/localized mute text (10px advance) are
 rotation-independent. Targets smaller than 96x80 are omitted. A private stack-local U8g2 decoder uses the existing
 u8g2_font_10x20_t_cyrillic asset and a RAM-only span callback. Scanlines clip
-font work to their own row and skip it outside the 20px text band. There are
+font work to their own row and skip it outside the text window (panel y+12
+through y+43, before the unchanged bar). The baseline stays at y+32; the
+window includes native-font descenders rather than clipping at the baseline. There are
 no heap allocations, LCD font primitives or application font/cursor mutations.
 The decoder context is 248 bytes on the 64-bit test host; persistent overlay
 state remains unchanged. The existing 6979-byte asset is referenced, not copied.
 Embedded flash/stack deltas and device timing are not measured.
+
+Host regression: `python3 tests/system_shortcuts/run.py` runs the real controller/audio
+suite plus an overlay fixture linked to the installed U8g2 C decoder and original
+Cyrillic font asset, normally and with ASan+UBSan. Set U8G2_CLIB to an existing
+read-only dependency directory if needed; no download or firmware build occurs.
+For Без звуку at 280x240, 240x280 and 128x128, the unclipped reference has ink
+at panel y+19 through y+35. Clipping at y+32 discarded 28 pixels (14 per у).
+Full-target and bounded scanline rendering now equal that reference, including
+both tails; the test also checks scanline guards, outside-panel pixels and expiry.
 
 Display::drawCanvas automatically protects feedback during complete-screen canvas
 presentation. Source canvases are never modified. Keep presenting complete frames
