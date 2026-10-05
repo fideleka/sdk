@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <type_traits>
-#include <u8g2.h>
+#include <clib/u8g2.h>
 
 namespace lilka {
 

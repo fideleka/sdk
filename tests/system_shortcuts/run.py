@@ -32,7 +32,7 @@ const int ping_raw_size = 2;
         flags = ["-fsanitize=address,undefined", "-fno-pie", "-no-pie"] if sanitize else []
         command = [os.environ.get("CXX", "g++"), "-std=c++11", "-DLILKA_VERSION=2", "-DLILKA_NO_AUDIO_HELLO",
                    "-Wall", "-Wextra", "-Wno-reorder", "-Wno-unused-parameter", *flags,
-                   "-I" + str(tmp), "-I" + str(TEST), "-I" + str(U8G2), str(tmp / "controller.cpp"),
+                   "-I" + str(tmp), "-I" + str(TEST), "-I" + str(U8G2.parent), str(tmp / "controller.cpp"),
                    str(tmp / "audio.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
         subprocess.run(command, check=True)
         subprocess.run([str(tmp / "regression")], check=True)
