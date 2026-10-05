@@ -3,6 +3,7 @@
 
 #include "config.h"
 #include "colors565.h"
+#include "volume_overlay.h"
 #include <Arduino_GFX_Library.h>
 #include <U8g2lib.h>
 
@@ -281,10 +282,28 @@ public:
     void drawCanvas(Canvas* canvas);
     /// Present without automatic overlay (for multi-layer renderers).
     void presentCanvas(Canvas* canvas);
-    /// Draw feedback from the render owner after restoring all underlying layers.
+    /// Multi-layer transaction: protect the opaque panel during all background
+    /// transfers, then finish with final pixels only. Caller serializes display
+    /// and holds source canvas locks during finish. Returns rotation invalidation.
+    bool prepareSystemOverlay(const VolumeOverlaySnapshot& state, uint32_t now);
+    /// Present outside the protected region: -1 all rows, 0 even, 1 odd.
+    void presentCanvasOutsideOverlay(Canvas* canvas, int parity = -1);
+    void clearOutsideOverlay(uint16_t color);
+    void finishSystemOverlay(Canvas* const* layers, int count);
+    bool systemOverlayNeedsTransfer() const;
+    /// Legacy raw-write helper: off-screen feedback only, no expiry restoration.
+    /// For flicker-free multi-layer rendering use the transaction API instead.
     void drawSystemOverlay();
 
 private:
+    static constexpr int overlayRowWidth =
+        LILKA_DISPLAY_WIDTH > LILKA_DISPLAY_HEIGHT ? LILKA_DISPLAY_WIDTH : LILKA_DISPLAY_HEIGHT;
+    uint16_t overlayRow[overlayRowWidth] = {};
+    VolumeOverlayGeometry overlayClip = {};
+    VolumeOverlaySnapshot overlayState;
+    bool overlayActive = false, overlayChanged = false;
+    int overlayWidth = 0, overlayHeight = 0, overlayRotation = -1;
+    int overlayLevel = -1;
     const void* splash;
     uint32_t rleLength;
 };

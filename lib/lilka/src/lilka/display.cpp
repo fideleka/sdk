@@ -237,15 +237,127 @@ void Display::presentCanvas(Canvas* canvas) {
     GFX<Display>::drawCanvas(canvas);
 }
 
+bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& state, uint32_t now) {
+    const bool rotated = overlayWidth != width() || overlayHeight != height() || overlayRotation != getRotation();
+    const auto geometry = volumeOverlayGeometry(width(), height());
+    const bool active = state.visible(now) && geometry.width && width() <= overlayRowWidth;
+    const int level = state.level < 0 ? 0 : (state.level > 100 ? 100 : state.level);
+    // Old LCD coordinates are invalid after rotation. Caller redraws background.
+    if (rotated) overlayClip = {};
+    overlayChanged = active && (!overlayActive || rotated || overlayLevel != level);
+    if (active) overlayClip = geometry;
+    overlayState = state;
+    overlayActive = active;
+    overlayLevel = level;
+    overlayWidth = width();
+    overlayHeight = height();
+    overlayRotation = getRotation();
+    return rotated;
+}
+
+void Display::presentCanvasOutsideOverlay(Canvas* canvas, int parity) {
+    const auto& g = overlayClip;
+    if (!g.width || canvas->x() + canvas->width() <= g.x || canvas->x() >= g.x + g.width ||
+        canvas->y() + canvas->height() <= g.y || canvas->y() >= g.y + g.height) {
+        if (parity < 0) presentCanvas(canvas);
+        else drawCanvasInterlaced(canvas, parity != 0);
+        return;
+    }
+    startWrite();
+    for (int row = parity < 0 ? 0 : parity; row < canvas->height(); row += parity < 0 ? 1 : 2) {
+        const int y = canvas->y() + row;
+        const int left = canvas->x(), right = left + canvas->width();
+        uint16_t* pixels = canvas->getFramebuffer() + row * canvas->width();
+        if (y < g.y || y >= g.y + g.height || right <= g.x || left >= g.x + g.width) {
+            // Keep contiguous bands above/below the panel as bulk transfers.
+            // Interlaced paths retain the existing one-window-per-selected-row.
+            const int rows =
+                parity < 0 ? min(int(canvas->height()) - row, y < g.y ? g.y - y : int(canvas->height())) : 1;
+            writeAddrWindow(left, y, canvas->width(), rows);
+            writePixels(pixels, canvas->width() * rows);
+            row += rows - 1;
+        } else {
+            const int before = max(0, g.x - left), after = max(left, g.x + g.width);
+            if (before) {
+                writeAddrWindow(left, y, before, 1);
+                writePixels(pixels, before);
+            }
+            if (after < right) {
+                writeAddrWindow(after, y, right - after, 1);
+                writePixels(pixels + after - left, right - after);
+            }
+        }
+    }
+    endWrite();
+}
+
+void Display::clearOutsideOverlay(uint16_t color) {
+    const auto& g = overlayClip;
+    if (!g.width) {
+        fillScreen(color);
+        return;
+    }
+    fillRect(0, 0, width(), g.y, color);
+    fillRect(0, g.y + g.height, width(), height() - g.y - g.height, color);
+    fillRect(0, g.y, g.x, g.height, color);
+    fillRect(g.x + g.width, g.y, width() - g.x - g.width, g.height, color);
+}
+
+bool Display::systemOverlayNeedsTransfer() const {
+    return overlayClip.width && (!overlayActive || overlayChanged);
+}
+
+void Display::finishSystemOverlay(Canvas* const* layers, int count) {
+    const auto g = overlayClip;
+    if (!systemOverlayNeedsTransfer()) return;
+    // One LCD window, complete final pixels only. Expiry composes black margins
+    // and every underlying layer in RAM before sending any affected pixel.
+    startWrite();
+    writeAddrWindow(g.x, g.y, g.width, g.height);
+    for (int y = g.y; y < g.y + g.height; ++y) {
+        if (overlayActive) {
+            VolumeOverlayRow row{overlayRow, g.x, y, g.width};
+            drawVolumeOverlay(row, overlayState, width(), height(), overlayState.adjustedAt);
+        } else {
+            for (int x = 0; x < g.width; ++x)
+                overlayRow[x] = colors::Black;
+            for (int i = 0; i < count; ++i) {
+                Canvas* canvas = layers[i];
+                if (!canvas || y < canvas->y() || y >= canvas->y() + canvas->height()) continue;
+                const int left = max(g.x, int(canvas->x()));
+                const int right = min(g.x + g.width, int(canvas->x() + canvas->width()));
+                const uint16_t* source = canvas->getFramebuffer() + (y - canvas->y()) * canvas->width();
+                for (int x = left; x < right; ++x)
+                    overlayRow[x - g.x] = source[x - canvas->x()];
+            }
+        }
+        writePixels(overlayRow, g.width);
+    }
+    endWrite();
+    overlayChanged = false;
+    if (!overlayActive) overlayClip = {};
+}
+
 void Display::drawCanvas(Canvas* canvas) {
-    presentCanvas(canvas);
     if (canvas->x() == 0 && canvas->y() == 0 && canvas->width() == width() && canvas->height() == height()) {
-        drawSystemOverlay();
+        prepareSystemOverlay(audio.getVolumeOverlay(), millis());
+        presentCanvasOutsideOverlay(canvas);
+        Canvas* layers[] = {canvas};
+        finishSystemOverlay(layers, 1);
+    } else {
+        presentCanvas(canvas);
     }
 }
 
 void Display::drawSystemOverlay() {
-    drawVolumeOverlay(*this, audio.getVolumeOverlay(), width(), height(), millis());
+    prepareSystemOverlay(audio.getVolumeOverlay(), millis());
+    // This compatibility API cannot restore an expired panel without sources.
+    // Multi-layer renderers must use the transaction API above.
+    if (overlayActive) {
+        // Raw presentation may have overwritten the panel since the last call.
+        overlayChanged = true;
+        finishSystemOverlay(nullptr, 0);
+    }
 }
 
 void Display::drawCanvasInterlaced(Canvas* canvas, bool odd) {

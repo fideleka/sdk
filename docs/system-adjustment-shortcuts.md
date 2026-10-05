@@ -52,11 +52,16 @@ white border, black background, cyan 22px bar and 12x20px percent/MUTE glyphs ar
 rotation-independent. Targets smaller than 96x80 are omitted. Existing rectangle
 primitives are reused, with no allocations or font/cursor mutations.
 
-Display::drawCanvas automatically draws feedback after complete-screen canvases
-only. Source canvases are never modified. Keep presenting complete frames while
-feedback is visible and for its expiry frame to restore underlying content.
-Display::presentCanvas presents a canvas without feedback for multi-layer owners;
-Display::drawSystemOverlay draws it after all underlying layers are restored.
+Display::drawCanvas automatically protects feedback during complete-screen canvas
+presentation. Source canvases are never modified. Keep presenting complete frames
+for expiry restoration. Multi-layer owners use prepareSystemOverlay,
+presentCanvasOutsideOverlay/clearOutsideOverlay, and finishSystemOverlay. The
+opaque panel is excluded from background transfers; its final pixels are rasterized
+in bounded RAM scanlines and sent through one LCD window only when changed. Expiry
+composes retained source layers and black margins before restoring each panel pixel
+once. Display::presentCanvas and legacy drawSystemOverlay are raw helpers and do
+not protect arbitrary external writes. Presentation state occupies 624 bytes on
+the tested host layout, including 560-byte scratch; there is no heap allocation.
 There is no universal task-safe composition/event hook: partial canvases,
 drawCanvasInterlaced, raw bitmaps/writePixels, direct drawing, and SDK applications
 that stop presenting while paused are not automatically covered. Their single
