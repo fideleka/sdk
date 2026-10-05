@@ -2,6 +2,7 @@
 #define LILKA_CONTROLLER_H
 
 #include "config.h"
+#include "system_shortcuts.h"
 
 #include <stdint.h>
 #include <freertos/FreeRTOS.h>
@@ -100,6 +101,9 @@ public:
     void setHandler(Button button, void (*handler)(bool));
     /// Видалити всі обробники подій.
     void clearHandlers();
+    /// Enable global Select-first adjustment chords (enabled by default).
+    /// Already consumed directions remain suppressed until physical release.
+    void setSystemShortcutsEnabled(bool enabled);
     /// Налаштувати автоматичне повторення натискання кнопки.
     ///
     /// Після виклику цього методу кнопка буде автоматично натискатися з певною затримкою та частотою.
@@ -119,6 +123,11 @@ private:
     // Input task FreeRTOS semaphore
     SemaphoreHandle_t semaphore;
     void inputTask();
+    int scanInputs(uint16_t rawPressed, uint32_t now);
+    uint16_t physicalPressed = 0;
+    uint32_t physicalTime[Button::ANY] = {};
+    detail::SystemShortcuts shortcuts;
+    bool systemShortcutsEnabled = true;
     State state;
     int8_t pins[Button::COUNT] = {
         LILKA_GPIO_UP,
