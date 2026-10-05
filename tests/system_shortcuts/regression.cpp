@@ -62,13 +62,17 @@ void chordTests() {
         assert(scan(c, S | bit, 120) == step);
         _StateButtons& states = *reinterpret_cast<_StateButtons*>(&c.state);
         invisible(states[direction]);
-        assert(events.size() == 1 && localEvents == 1);
+        assert(events.size() == 2 && localEvents == 2);
+        assert(events.back() == Event(SELECT, false));
+        assert(c.peekState().selectConsumed && c.peekState().selectHeld);
+        invisible(c.peekState().select);
         assert(scan(c, S | bit, 519) == 0);
         assert(scan(c, S | bit, 520) == step);
         assert(scan(c, S | bit, 619) == 0);
         assert(scan(c, S | bit, 620) == step);
         assert(scan(c, bit, 640) == 0); // Select released FIRST.
-        assert(c.getState().select.justReleased);
+        assert(!c.getState().select.justReleased);
+        assert(c.peekState().selectConsumed && !c.peekState().selectHeld);
         assert(scan(c, bit, 1200) == 0);
         invisible(states[direction]);
         assert(events.size() == 2 && localEvents == 2);
@@ -96,6 +100,28 @@ void chordTests() {
         State state = startFirst.getState();
         assert(state.start.justPressed && state.select.pressed);
         assert((*reinterpret_cast<_StateButtons*>(&startFirst.state))[direction].pressed);
+    }
+    // Boot and launch/menu scans with raw Select high cannot form a volume chord.
+    for (int direction = UP; direction <= DOWN; ++direction) {
+        Controller boot;
+        const uint16_t bit = 1 << direction;
+        for (uint32_t now : {10u, 20u, 500u, 10000u}) {
+            assert(scan(boot, bit, now) == 0);
+            assert(!boot.peekState().selectHeld && !boot.peekState().selectConsumed);
+        }
+        Controller launch;
+        scan(launch, S, 100);
+        // Select has physically released, but its debounced level remains stale.
+        assert(scan(launch, bit, 105) == 0);
+        assert(launch.peekState().selectHeld);
+        assert(!launch.peekState().selectConsumed);
+        assert(scan(launch, bit, 106) == 0);
+        assert(scan(launch, bit, 110) == 0);
+        assert(!launch.peekState().selectHeld);
+        assert(scan(launch, bit, 10000) == 0);
+        scan(launch, 0, 10020);
+        assert(scan(launch, bit, 10040) == 0);
+        assert((*reinterpret_cast<_StateButtons*>(&launch.state))[direction].justPressed);
     }
     // Raw Start wins even while a recent Start release blocks its debounce.
     Controller debounceStart;
@@ -131,7 +157,7 @@ void chordTests() {
     detail::SystemShortcuts opposite;
     opposite.scan(S, 100, true);
     auto result = opposite.scan(S | 15, 120, true);
-    assert(result.suppressed == 3 && result.volumeSteps == 0);
+    assert(result.suppressed == (3 | S) && result.volumeSteps == 0);
     detail::SystemShortcuts wrap;
     wrap.scan(S, UINT32_MAX - 200, true);
     assert(wrap.scan(S | 1, UINT32_MAX - 100, true).volumeSteps == 1);
@@ -213,7 +239,31 @@ void gentleShortcutTests() {
     for (int level : {0, 1, 2, 3, 4, 5, 10, 100}) {
         audio.setVolume(level);
         audio.stepVolumeShortcut(-1);
-        assert(audio.getVolume() == (level < 5 ? 0 : level - 5));
+        assert(audio.getVolume() == (level == 0 ? 0 : (level <= 4 ? level - 1 : level - 5)));
+    }
+    // Exact descending sequences through real controller taps AND held repeats.
+    for (bool held : {false, true}) {
+        for (int initial : {4, 10}) {
+            Controller c;
+            audio.setVolume(initial);
+            hostWrites = 0;
+            scan(c, S, 20000);
+            uint32_t now = 20020;
+            const std::vector<int> expected = initial == 4 ? std::vector<int>{3, 2, 1, 0, 0} :
+                                                           std::vector<int>{5, 0, 0};
+            for (size_t i = 0; i < expected.size(); ++i) {
+                if (i && !held) scan(c, S, now - 20);
+                assert(scan(c, S | (1 << DOWN), now) == -5);
+                assert(audio.getVolume() == expected[i]);
+                if (expected[i] == 0) {
+                    int16_t sample = 1000;
+                    audio.adjustVolume(&sample, sizeof(sample), 16, audio.getVolume());
+                    assert(sample == 0);
+                }
+                now += held ? (i == 0 ? 400 : 100) : 40;
+            }
+            assert(hostWrites == 0);
+        }
     }
     audio.setVolume(100);
     hostWrites = 0;

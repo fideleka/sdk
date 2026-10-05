@@ -11,22 +11,26 @@ public:
     struct Result {
         uint16_t suppressed;
         int volumeSteps;
+        bool selectConsumed;
     };
 
-    Result scan(uint16_t pressed, uint32_t now, bool enabled) {
+    Result scan(uint16_t pressed, uint32_t now, bool enabled, bool selectAdjusting = true) {
         constexpr uint16_t select = 1 << 8;
         constexpr uint16_t start = 1 << 9;
-        Result result = {suppressed, 0};
+        // Cancellation survives missed release scans until the next physical press.
+        if ((pressed & select) && !(previous & select)) selectConsumed = false;
+        Result result = {suppressed, 0, selectConsumed};
         // Include the release scan, so no unmatched callback/release leaks out.
         suppressed &= pressed;
         active &= pressed;
-        if (!enabled || !(pressed & select) || (pressed & start)) active = 0;
+        if (!selectAdjusting || !enabled || !(pressed & select) || (pressed & start)) active = 0;
         for (int direction = 0; direction < 2; ++direction) {
             const uint16_t bit = 1 << direction;
-            const bool capture = enabled && (previous & select) && (pressed & select) && !(pressed & start) &&
-                                 (pressed & bit) && !(previous & bit);
+            const bool capture = selectAdjusting && enabled && (previous & select) && (pressed & select) &&
+                                 !(pressed & start) && (pressed & bit) && !(previous & bit);
             if (capture) {
-                suppressed |= bit;
+                suppressed |= bit | select;
+                selectConsumed = true;
                 active |= bit;
                 nextRepeat[direction] = now + 400;
             }
@@ -38,12 +42,15 @@ public:
                 if (direction == 1) --result.volumeSteps;
             }
         }
+        if (selectConsumed && (pressed & select)) suppressed |= select;
+        result.selectConsumed = selectConsumed;
         result.suppressed |= suppressed;
         previous = pressed;
         return result;
     }
 
 private:
+    bool selectConsumed = false;
     uint16_t previous = 0;
     uint16_t suppressed = 0;
     uint16_t active = 0;
