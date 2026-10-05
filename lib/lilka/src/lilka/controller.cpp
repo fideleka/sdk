@@ -54,14 +54,18 @@ int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
     // A raw Start press wins even during its debounce window. A raw Select
     // release stops adjustments immediately, without changing normal Select events.
     uint16_t shortcutPressed = physicalPressed | (rawPressed & (1 << START));
-    if (!(rawPressed & (1 << SELECT))) shortcutPressed &= ~(1 << SELECT);
-    auto adjustment = shortcuts.scan(shortcutPressed, now, systemShortcutsEnabled);
+    auto adjustment = shortcuts.scan(shortcutPressed, now, systemShortcutsEnabled, rawPressed & (1 << SELECT));
     _StateButtons& buttons = *reinterpret_cast<_StateButtons*>(&state);
+    state.selectHeld = physicalPressed & (1 << SELECT);
+    state.selectConsumed = adjustment.selectConsumed;
     state.any.pressed = false;
     uint16_t changed = 0;
     for (int i = 0; i < Button::ANY; ++i) {
         ButtonState& button = buttons[i];
         if (adjustment.suppressed & (1 << i)) {
+            // Pair the immediately delivered Select press with cancellation.
+            // Callbacks run only after publishing the complete snapshot.
+            if (i == SELECT && button.pressed) changed |= 1 << i;
             button.pressed = false;
             button.justPressed = false;
             button.justReleased = false;
@@ -94,7 +98,7 @@ int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
     // Select/Start must not see a half-dispatched simultaneous scan.
     for (int i = 0; i < Button::ANY; ++i) {
         if (!(changed & (1 << i))) continue;
-        const bool pressed = physicalPressed & (1 << i);
+        const bool pressed = buttons[i].pressed;
         if (handlers[i] != NULL) handlers[i](pressed);
         if (globalHandler != NULL) globalHandler((Button)i, pressed);
     }
