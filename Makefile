@@ -82,9 +82,14 @@ cppcheck: ## Run cppcheck check
 		--enable=performance,style \
 		--suppress=knownPointerToBool \
 		--suppress=noCopyConstructor \
+		--suppress=useStlAlgorithm \
 		--suppress=noOperatorEq \
 		--inline-suppr \
 		--error-exitcode=1
 
 .PHONY: fix
 fix: ## Fix code style
+
+.PHONY: layer_audit
+layer_audit: ## Run audit on source code
+	python tools/layer_audit.py
