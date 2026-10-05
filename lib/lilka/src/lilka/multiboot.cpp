@@ -25,7 +25,7 @@ extern FileUtils fileutils;
 #define MULTIBOOT_PATH_KEY "multiboot_path"
 
 MultiBoot::MultiBoot() :
-    ota_handle(0), current_partition(NULL), ota_partition(NULL), path(""), bytesTotal(0), bytesWritten(0), file(NULL) {
+    path(""), file(NULL), ota_handle(0), current_partition(NULL), ota_partition(NULL), bytesWritten(0), bytesTotal(0) {
 }
 
 void MultiBoot::begin() {
