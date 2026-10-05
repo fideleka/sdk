@@ -11,13 +11,14 @@
 #include "lilka/buzzer.h"
 #include "lilka/ui.h"
 #include "lilka/multiboot.h"
-#include "lilka/sys.h"
 #include "lilka/resources.h"
+#include "lilka/partitions.h"
 #include "lilka/stringutils.h"
 #include "lilka/fmath.h"
 #include "lilka/audio.h"
 #include "lilka/sdk.h"
 #include "lilka/dynloader.h"
+#include "lilka/config/config.h"
 
 namespace lilka {
 /// Ініціалізація Лілки
