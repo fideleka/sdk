@@ -55,6 +55,11 @@ typedef struct {
     ButtonState start;
     /// Спеціальний стан, який містить стани "будь-якої" кнопки.
     ButtonState any;
+    /// Physical Select level, reserved for higher-priority Select+Start chords.
+    bool selectHeld;
+    /// Consumed Select gesture: cancel deferred actions. Persists through release
+    /// and getState/resetState until the next physical Select press.
+    bool selectConsumed;
 } State;
 
 // Так, так, тут колись був union... Але doxygen + breathe не люблять union, які містять анонімні структури. :(

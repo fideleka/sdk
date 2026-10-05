@@ -5,20 +5,49 @@ no application callback is installed or replaced. Applications can opt out with
 lilka::controller.setSystemShortcutsEnabled(false).
 
 - Hold **Select first**, then press **Up / Down**. Up uses +1 below 5, then +5:
-  0→1→2→3→4→5→10→15. Down remains -5, clamped at mute.
+  0→1→2→3→4→5→10→15. Down uses -1 at current volume 4 or below, otherwise -5, clamped at mute:
+  10→5→0 and 4→3→2→1→0 (5 does not descend to 4).
 - One immediate step; first repeat at 400 ms, then every 100 ms. This timing is
   independent of application auto-repeat and emulator per-axis precision delays.
 - Volume clamps to 0..100, including actual mute. Opposite simultaneous directions
   cancel their adjustment; each is still consumed.
 - A simultaneous Select/direction press, or direction-first press, stays ordinary.
-  Select must already have been observed held in an earlier physical scan.
+  Select must already have been observed held in an earlier physical scan,
+  and both raw and debounced Select must still be held on capture. Raw Select
+  release stops repeats immediately, even before its debounced release.
+  Suppression/cancellation never serves as physical history.
 - **Select + Start has priority**, including a raw Start press during debounce.
-  It cancels active adjustment repeats for that hold. Select and Start remain
-  visible normally, preserving existing pause/exit handling and Select semantics.
+  It cancels active adjustment repeats for that hold. Start remains visible;
+  higher-priority pause/exit consumers use State::selectHeld even after volume
+  has consumed Select.
 - A consumed direction is invisible to getState/peekState and both per-button and
   global callbacks, including its release. Suppression lasts until physical release,
   even if Select releases first, shortcuts are disabled, or Start cancels the hold.
   A fresh direction press works normally afterward.
+- Plain Select presses are still immediate, with ordinary release semantics and
+  no new delay. Once a volume chord captures, Select becomes invisible for the
+  remainder of its hold and release, with pending press/release/repeat flags cleared.
+  Its already-delivered callback press is paired with exactly one false callback
+  at capture; peekState() in that callback sees the complete canceled snapshot.
+  State::selectConsumed remains true through release and getState/resetState until
+  the next physical Select press. Deferred-release consumers must cancel pending
+  Select actions on this flag, not synthesize a tap from !select.pressed.
+  State::selectHeld exposes the debounced physical modifier for Select+Start only.
+  Existing callback signatures and ordinary controls are unchanged; callbacks cannot
+  undo actions that an application already executed on the initial Select press.
+
+## Raw Select diagnostic boundary
+
+On v2 Select is active-low GPIO0, configured INPUT_PULLUP by Controller::begin.
+Boot/launch/menu Up or Down with raw Select high must never adjust volume; host
+tests cover boot-only navigation, stale debounced Select during raw release, and
+fresh navigation after shortcut release. A launch-held or electrically stuck-low
+GPIO0 is still indistinguishable from a real held Select in software. If a WAD
+picker adjusts volume with the physical button released, measure/log raw GPIO0
+(high when released, low when pressed) and compare State::selectHeld; inspect
+switch/wiring/pull-up/pin ownership and actual flashed SDK selection. Host masks
+cannot prove GPIO health or the deployed binary. No Doom workaround, shortcut
+disabling, or fabricated GPIO-fault fix is applied.
 
 ## Brightness: concrete Lilka v2 hardware limitation
 
@@ -105,7 +134,10 @@ for NES, Game Boy, tracker and AudioPlayer output.
 ## Source-only regression
 
 Run python3 tests/system_shortcuts/run.py (C++11 normal and ASan/UBSan, including
-gentle taps/holds, bounds, descending, opposite cancellation and timeout/wrap) and
+gentle taps/holds, bounds, descending, Select cancellation, opposite cancellation and timeout/wrap)
+and matching Keira python3 tests/volume_select.py --sdk ../sdk (actual Controller,
+NES OSD, GB modifier/mapping, shared menu update; both release orders, delayed
+readers, next tap and Start priority) and
 python3 tests/menu/run.py --sanitize. Binaries and source mocks live only in a
 temporary host directory. Matching Keira tests/volume_overlay.py executes SDK
 presentation and Keira render paths under pixel stubs with the real maintained
