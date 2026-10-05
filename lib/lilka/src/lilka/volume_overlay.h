@@ -12,6 +12,9 @@ struct VolumeOverlaySnapshot {
     int level = 0;
     uint32_t adjustedAt = 0;
     bool valid = false;
+    /// Owned UTF-8 BMP label (31 bytes + terminator). Standalone default.
+    /// Label changes do not renew the feedback timeout.
+    char muteLabel[32] = "Mute";
     bool visible(uint32_t now) const {
         return valid && now - adjustedAt < 1200;
     }
@@ -68,16 +71,36 @@ struct VolumeOverlayFontTarget {
 
 template <typename Target>
 void volumeOverlayFontWindow(u8g2_t& decoder, const Target&, const VolumeOverlayGeometry& g) {
-    decoder.user_x0 = g.x;
-    decoder.user_x1 = g.x + g.width;
+    decoder.user_x0 = g.x + 2;
+    decoder.user_x1 = g.x + g.width - 2;
     decoder.user_y0 = g.y + 12;
-    decoder.user_y1 = g.y + 32;
+    // The baseline is not the bottom: native Cyrillic glyphs have descenders.
+    // Keep the text window above the unchanged bar, including those lower rows.
+    decoder.user_y1 = g.barY;
 }
 
 inline void volumeOverlayFontWindow(u8g2_t& decoder, const VolumeOverlayRow& row, const VolumeOverlayGeometry& g) {
     volumeOverlayFontWindow<VolumeOverlayRow>(decoder, row, g);
     decoder.user_y0 = row.y;
     decoder.user_y1 = row.y + 1;
+}
+
+/// Bounded UTF-8 decoder for the font's BMP glyph API. Invalid, truncated,
+/// overlong and non-BMP sequences stop decoding; no reads past the snapshot.
+inline uint16_t volumeOverlayNextGlyph(const char* text, size_t capacity, size_t& offset) {
+    if (offset >= capacity) return 0;
+    const uint8_t first = static_cast<uint8_t>(text[offset++]);
+    if (first < 0x80) return first;
+    const int extra = first >= 0xc2 && first <= 0xdf ? 1 : first >= 0xe0 && first <= 0xef ? 2 : 0;
+    if (!extra || offset + extra > capacity) return 0;
+    uint16_t glyph = first & (extra == 1 ? 0x1f : 0x0f);
+    for (int i = 0; i < extra; ++i) {
+        const uint8_t next = static_cast<uint8_t>(text[offset++]);
+        if ((next & 0xc0) != 0x80) return 0;
+        glyph = (glyph << 6) | (next & 0x3f);
+    }
+    if ((extra == 2 && glyph < 0x800) || (glyph >= 0xd800 && glyph <= 0xdfff)) return 0;
+    return glyph;
 }
 
 /// Draw on an off-screen presentation target, never an application's source canvas.
@@ -97,18 +120,14 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     if (filled) target.fillRect(g.barX + 2, g.barY + 2, filled, g.barHeight - 4, cyan);
     char text[5] = {};
     int count = 0;
-    if (!level) {
-        text[0] = 'M';
-        text[1] = 'U';
-        text[2] = 'T';
-        text[3] = 'E';
-        count = 4;
-    } else {
+    if (level) {
         if (level == 100) text[count++] = '1';
         if (level >= 10) text[count++] = '0' + (level / 10) % 10;
         text[count++] = '0' + level % 10;
         text[count++] = '%';
     }
+    const char* label = level ? text : state.muteLabel;
+    const size_t capacity = level ? sizeof(text) : sizeof(state.muteLabel);
     VolumeOverlayFontTarget<Target> context{};
     context.target = &target;
     auto& decoder = context.decoder;
@@ -116,7 +135,7 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     decoder.cb = &callbacks;
     volumeOverlayFontWindow(decoder, target, g);
     // Only the text band needs font decoding during scanline presentation.
-    if (decoder.user_y1 <= g.y + 12 || decoder.user_y0 >= g.y + 32) return;
+    if (decoder.user_y1 <= g.y + 12 || decoder.user_y0 >= g.barY) return;
 #ifdef U8G2_WITH_CLIP_WINDOW_SUPPORT
     decoder.is_page_clip_window_intersection = 1;
 #endif
@@ -125,11 +144,16 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     u8g2_SetFontMode(&decoder, 1);
     u8g2_SetFontPosBaseline(&decoder);
     int advance = 0;
-    for (int i = 0; i < count; ++i)
-        advance += u8g2_GetGlyphWidth(&decoder, text[i]);
+    size_t offset = 0;
+    uint16_t glyph;
+    while ((glyph = volumeOverlayNextGlyph(label, capacity, offset)))
+        advance += u8g2_GetGlyphWidth(&decoder, glyph);
+    // Narrow targets clip inside the panel, never outside its border.
     int x = g.x + (g.width - advance) / 2;
-    for (int i = 0; i < count; ++i)
-        x += u8g2_DrawGlyph(&decoder, x, g.y + 32, text[i]);
+    if (x < g.x + 2) x = g.x + 2;
+    offset = 0;
+    while ((glyph = volumeOverlayNextGlyph(label, capacity, offset)))
+        x += u8g2_DrawGlyph(&decoder, x, g.y + 32, glyph);
 }
 
 } // namespace lilka

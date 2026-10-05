@@ -77,14 +77,25 @@ last shortcut step and handles unsigned millis wrap. Cancellation does not renew
 
 volume_overlay.h exposes reusable geometry and drawVolumeOverlay(target, snapshot,
 width, height, now). The panel is centered, 75% of display width and 76px high; its
-white border, black background, cyan 22px bar and unscaled regular FONT_10x20 percent/MUTE text (10px advance) are
+white border, black background, cyan 22px bar and unscaled regular FONT_10x20 percent/localized mute text (10px advance) are
 rotation-independent. Targets smaller than 96x80 are omitted. A private stack-local U8g2 decoder uses the existing
 u8g2_font_10x20_t_cyrillic asset and a RAM-only span callback. Scanlines clip
-font work to their own row and skip it outside the 20px text band. There are
+font work to their own row and skip it outside the text window (panel y+12
+through y+43, before the unchanged bar). The baseline stays at y+32; the
+window includes native-font descenders rather than clipping at the baseline. There are
 no heap allocations, LCD font primitives or application font/cursor mutations.
 The decoder context is 248 bytes on the 64-bit test host; persistent overlay
 state remains unchanged. The existing 6979-byte asset is referenced, not copied.
 Embedded flash/stack deltas and device timing are not measured.
+
+Host regression: `python3 tests/system_shortcuts/run.py` runs the real controller/audio
+suite plus an overlay fixture linked to the installed U8g2 C decoder and original
+Cyrillic font asset, normally and with ASan+UBSan. Set U8G2_CLIB to an existing
+read-only dependency directory if needed; no download or firmware build occurs.
+For Без звуку at 280x240, 240x280 and 128x128, the unclipped reference has ink
+at panel y+19 through y+35. Clipping at y+32 discarded 28 pixels (14 per у).
+Full-target and bounded scanline rendering now equal that reference, including
+both tails; the test also checks scanline guards, outside-panel pixels and expiry.
 
 Display::drawCanvas automatically protects feedback during complete-screen canvas
 presentation. Source canvases are never modified. Keep presenting complete frames
@@ -94,7 +105,7 @@ opaque panel is excluded from background transfers; its final pixels are rasteri
 in bounded RAM scanlines and sent through one LCD window only when changed. Expiry
 composes retained source layers and black margins before restoring each panel pixel
 once. Display::presentCanvas and legacy drawSystemOverlay are raw helpers and do
-not protect arbitrary external writes. Presentation state occupies 624 bytes on
+not protect arbitrary external writes. Presentation state occupies 656 bytes on
 the tested host layout, including 560-byte scratch; there is no heap allocation.
 There is no universal task-safe composition/event hook: partial canvases,
 drawCanvasInterlaced, raw bitmaps/writePixels, direct drawing, and SDK applications
@@ -149,3 +160,18 @@ No dependency download or .pio creation occurs.
 No PlatformIO, dependency resolution, firmware build,
 flash, ROM/save write, or cache creation is involved. Hardware audio, task-stack
 headroom, persistence across reboot and release readiness remain device/build gates.
+
+### Localized mute label
+
+VolumeOverlaySnapshot owns a 32-byte muteLabel array, defaulting to normal-case
+"Mute" for standalone SDK apps. Supply at most 31 UTF-8 bytes plus NUL in a copied
+snapshot before prepareSystemOverlay; no pointer lifetime dependency, heap, NVS,
+or application font/cursor changes. Keira uses K_S_VOLUME_MUTE through its existing
+compile-time keira_lang.h selector: default/LANG_UK "Без звуку", LANG_EN "Mute".
+The existing regular Cyrillic FONT_10x20 asset decodes BMP UTF-8 and centers using
+actual glyph advances. Invalid/truncated/non-BMP sequences stop safely, unsupported
+font glyphs retain U8g2's behavior, and over-wide labels clip inside the panel.
+Label-only changes at mute repaint even with unchanged volume; they never renew
+the 1200ms timeout. Non-mute percentage rendering is unaffected. The owned label
+adds 32 bytes per snapshot; persistent host Display state is 656 bytes (was 624).
+No firmware size, device stack watermark or SPI timing is claimed.

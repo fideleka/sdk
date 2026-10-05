@@ -270,6 +270,9 @@ void gentleShortcutTests() {
     hostNow = 10000;
     audio.stepVolumeShortcut(1);
     auto feedback = audio.getVolumeOverlay();
+    assert(strcmp(feedback.muteLabel, "Mute") == 0);
+    strcpy(feedback.muteLabel, "Без звуку");
+    assert(strcmp(audio.getVolumeOverlay().muteLabel, "Mute") == 0);
     assert(audio.getVolume() == 100 && feedback.level == 100 && feedback.visible(11199));
     assert(!feedback.visible(11200));
     hostNow = 11000;
