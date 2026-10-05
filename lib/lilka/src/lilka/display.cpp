@@ -6,6 +6,7 @@
 #include "fmath.h"
 #include "buzzer.h"
 #include "audio.h"
+#include <cstring>
 
 namespace lilka {
 
@@ -244,7 +245,9 @@ bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& state, uint32_t 
     const int level = state.level < 0 ? 0 : (state.level > 100 ? 100 : state.level);
     // Old LCD coordinates are invalid after rotation. Caller redraws background.
     if (rotated) overlayClip = {};
-    overlayChanged = active && (!overlayActive || rotated || overlayLevel != level);
+    const bool labelChanged =
+        !level && std::memcmp(overlayState.muteLabel, state.muteLabel, sizeof(state.muteLabel)) != 0;
+    overlayChanged = active && (!overlayActive || rotated || overlayLevel != level || labelChanged);
     if (active) overlayClip = geometry;
     overlayState = state;
     overlayActive = active;
