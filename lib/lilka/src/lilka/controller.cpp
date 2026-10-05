@@ -22,7 +22,7 @@ private:
     SemaphoreHandle_t semaphore;
 };
 
-Controller::Controller() : state{}, semaphore(xSemaphoreCreateRecursiveMutex()) {
+Controller::Controller() : semaphore(xSemaphoreCreateRecursiveMutex()), state{} {
     for (int i = 0; i < Button::COUNT; i++) {
         _StateButtons& buttons = *reinterpret_cast<_StateButtons*>(&state);
 

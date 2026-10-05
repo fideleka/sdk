@@ -96,6 +96,16 @@ void scrolling() {
     }
 }
 
+void pageNavigation() {
+    lilka::Menu menu("Paging");
+    for(int i=0;i<12;++i)menu.addItem("row "+std::to_string(i),nullptr,brown);
+    for(int cursor : {0,1,4,5,6,11}) {
+        menu.setCursor(cursor);lilka::controller.state={};lilka::controller.state.left.justPressed=true;
+        menu.update();check(menu.getCursor()==(cursor==0 ? 11 : cursor<=5 ? 0 : cursor-5),"PageUp floor/wrap");
+    }
+    lilka::controller.state={};
+}
+
 void marqueeHeader() {
     lilka::Menu menu("Menu header that must use a marquee");
     menu.setColor(lilka::colors::Yellow);
@@ -116,6 +126,7 @@ int main() {
     variants();
     scrolling();
     marqueeHeader();
+    pageNavigation();
     std::cout << checks << " checks, " << failures << " failures\n";
     return failures ? 1 : 0;
 }
