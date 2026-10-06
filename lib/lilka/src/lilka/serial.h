@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <queue>
+#include <atomic>
 #include "fileutils.h"
 
 #include <esp32/clk.h>
@@ -48,6 +49,8 @@ public:
     void log(const char* format, ...);
     void err(const char* format, ...);
     void idf(const char* format, ...);
+    /// Records dropped under logger contention/backpressure.
+    uint32_t droppedLogs() const { return dropped.load(); }
 
 private:
     // Doing all work in a separate task
@@ -55,9 +58,8 @@ private:
     // Some fun
     void writeGreetingMessage();
 
-    // Mutex lock
-    void lock();
-    void unlock();
+    void enqueue(const char* level, const char* text);
+    void drainOnce();
 
     // STDIO VFS :
     static void register_stdio_vfs();
@@ -69,7 +71,10 @@ private:
 
     // Storage and mutex for this storage
     SemaphoreHandle_t serialMutex = xSemaphoreCreateMutex();
-    char msgbuffer[TX_BUFFER_SIZE] = {};
+    static constexpr size_t QueueLimit = 16;
+    std::atomic<uint32_t> dropped{0};
+    String pending;
+    size_t pendingOffset = 0;
     std::queue<String> serialQueue;
 };
 
