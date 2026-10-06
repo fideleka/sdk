@@ -11,7 +11,7 @@ void serial_log(const char* format, ...) {
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    serial.log(buffer);
+    serial.log("%s", buffer);
 }
 
 void serial_err(const char* format, ...) {
@@ -21,29 +21,25 @@ void serial_err(const char* format, ...) {
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
 
-    serial.err(buffer);
+    serial.err("%s", buffer);
 }
 
 int serial_idf(const char* format, va_list args) {
     char buffer[TX_BUFFER_SIZE];
 
     int cnt = vsnprintf(buffer, sizeof(buffer), format, args);
-    serial.idf(buffer);
+    serial.idf("%s", buffer);
     return cnt;
 }
 
 SerialInterface::SerialInterface() {
 }
-void SerialInterface::lock() {
-    xSemaphoreTake(serialMutex, portMAX_DELAY);
-}
-void SerialInterface::unlock() {
-    xSemaphoreGive(serialMutex);
-}
-
 void SerialInterface::begin(unsigned long baud) {
     Serial.begin(baud);
     Serial.setTimeout(SERIAL_TIMEOUT);
+#if ARDUINO_USB_CDC_ON_BOOT
+    Serial.setTxTimeoutMs(0);
+#endif
 #ifndef NO_GREETING_MESSAGE
     writeGreetingMessage();
 #endif
@@ -67,45 +63,43 @@ void SerialInterface::begin(unsigned long baud) {
     // printf("You entered: %d\n", num);
 }
 
+void SerialInterface::enqueue(const char* level, const char* text) {
+    char record[TX_BUFFER_SIZE + 128];
+    snprintf(record, sizeof(record), "[ %010lu ]%s%s", static_cast<unsigned long>(millis()), level, text);
+    String line(record);
+    if (line.isEmpty() || line[line.length() - 1] != '\n') line += '\n';
+    // Never wait behind output, Wi-Fi callbacks or another formatter.
+    if (!serialMutex || !xSemaphoreTake(serialMutex, 0)) { ++dropped; return; }
+    if (serialQueue.size() < QueueLimit) serialQueue.push(line);
+    else ++dropped;
+    xSemaphoreGive(serialMutex);
+}
+
 void SerialInterface::log(const char* format, ...) {
+    char text[TX_BUFFER_SIZE];
     va_list args;
     va_start(args, format);
-    lock();
-    vsnprintf(msgbuffer, sizeof(msgbuffer), format, args);
-    unlock();
+    vsnprintf(text, sizeof(text), format, args);
     va_end(args);
-    serial.lock();
-    char millisCstr[11]; // 10 digits + 1 for null terminator
-    snprintf(millisCstr, sizeof(millisCstr), "%010lu", millis());
-    serialQueue.push(String("[ ") + millisCstr + " ]" + String(LILKA_LOG_FORMAT) + msgbuffer);
-    serial.unlock();
+    enqueue(LILKA_LOG_FORMAT, text);
 }
 
 void SerialInterface::err(const char* format, ...) {
+    char text[TX_BUFFER_SIZE];
     va_list args;
     va_start(args, format);
-    lock();
-    vsnprintf(msgbuffer, sizeof(msgbuffer), format, args);
-    unlock();
+    vsnprintf(text, sizeof(text), format, args);
     va_end(args);
-    serial.lock();
-    char millisCstr[11]; // 10 digits + 1 for null terminator
-    snprintf(millisCstr, sizeof(millisCstr), "%010lu", millis());
-    serialQueue.push(String("[ ") + millisCstr + " ]" + String(LILKA_ERR_FORMAT) + msgbuffer);
-    serial.unlock();
+    enqueue(LILKA_ERR_FORMAT, text);
 }
+
 void SerialInterface::idf(const char* format, ...) {
+    char text[TX_BUFFER_SIZE];
     va_list args;
     va_start(args, format);
-    lock();
-    vsnprintf(msgbuffer, sizeof(msgbuffer), format, args);
-    unlock();
+    vsnprintf(text, sizeof(text), format, args);
     va_end(args);
-    serial.lock();
-    char millisCstr[11]; // 10 digits + 1 for null terminator
-    snprintf(millisCstr, sizeof(millisCstr), "%010lu", millis());
-    serialQueue.push(String("[ ") + millisCstr + " ]" + String(LILKA_IDF_FORMAT) + msgbuffer);
-    serial.unlock();
+    enqueue(LILKA_IDF_FORMAT, text);
 }
 
 void SerialInterface::writeGreetingMessage() {
@@ -155,33 +149,27 @@ void SerialInterface::writeGreetingMessage() {
     log("Last Reset Reason: %d\n", esp_reset_reason());
 }
 
+void SerialInterface::drainOnce() {
+    if (pending.isEmpty()) {
+        if (!serialMutex || !xSemaphoreTake(serialMutex, 0)) return;
+        if (!serialQueue.empty()) { pending = serialQueue.front(); serialQueue.pop(); }
+        xSemaphoreGive(serialMutex);
+        pendingOffset = 0;
+    }
+    if (pending.isEmpty()) return;
+    // One attempt per tick, no flush and no mutex held during USB/UART I/O.
+    const int available = Serial.availableForWrite();
+    if (available <= 0) return;
+    const size_t remaining = pending.length() - pendingOffset;
+    const size_t count = remaining < size_t(available) ? remaining : size_t(available);
+    const size_t written = Serial.write(reinterpret_cast<const uint8_t*>(pending.c_str() + pendingOffset), count);
+    pendingOffset += written < count ? written : count;
+    if (pendingOffset == pending.length()) { pending = ""; pendingOffset = 0; }
+}
+
 void SerialInterface::run() {
     while (1) {
-        if (millis() < 1000) {
-            // sleep a while, to not miss something
-            vTaskDelay(5 / portTICK_PERIOD_MS);
-            continue;
-        }
-
-        lock();
-        while (!serialQueue.empty()) {
-            // lock
-            String outputLine = serialQueue.front();
-            size_t len = outputLine.length();
-            size_t sent = 0;
-            size_t availableSpace = Serial.availableForWrite();
-            while (sent < len) {
-                size_t toSend = (len - sent) > availableSpace ? availableSpace : (len - sent);
-                Serial.write(outputLine.c_str() + sent, toSend);
-                Serial.flush();
-
-                sent += toSend;
-            }
-            if (outputLine[len - 1] != '\n') Serial.write("\n", 1);
-            Serial.flush();
-            serialQueue.pop();
-        }
-        unlock();
+        if (millis() >= 1000) drainOnce();
         vTaskDelay(5 / portTICK_PERIOD_MS);
     }
 }
@@ -287,13 +275,13 @@ ssize_t SerialInterface::stdio_vfs_write(int fd, const void* data, size_t size) 
         case STDIN_FD:
             // Lol, who writes to stdin
             serial.err("Hey, don't use stdin for output!");
-            serial.log(str.c_str()); // should be default esp-idf behavior
+            serial.log("%s", str.c_str()); // should be default esp-idf behavior
             break;
         case STDOUT_FD:
-            serial.log(str.c_str());
+            serial.log("%s", str.c_str());
             break;
         case STDERR_FD:
-            serial.err(str.c_str());
+            serial.err("%s", str.c_str());
     }
     return size;
 }
