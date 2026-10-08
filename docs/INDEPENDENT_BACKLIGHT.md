@@ -14,20 +14,20 @@ Included by `<lilka.h>` and initialized automatically by `lilka::begin()` throug
 lilka::brightness.isEnabled();
 lilka::brightness.getBrightness();           // RAM only, 0..100
 lilka::brightness.setBrightness(40);         // clamp, apply, deferred save
-lilka::brightness.changeBrightnessLive(-10); // bounded relative change
-lilka::brightness.stepBrightnessShortcut(1);// +10 and feedback
+lilka::brightness.changeBrightnessLive(-5); // bounded relative change
+lilka::brightness.stepBrightnessShortcut(1);// +5 and feedback
 ```
 
 Setters return false on unsupported hardware or failed hardware updates. Disabled builds report 100 without accessing brightness NVS or LEDC. PWM percent is duty cycle, not a calibrated perceptual scale.
 
 ## Global controls and feedback
 
-- Hold Select first, then Left/Right: -/+10 percentage points.
+- Hold Select first, then Left/Right: -/+5 percentage points.
 - Repeat starts after 400 ms and proceeds every 100 ms, with no catch-up bursts.
 - Consumed directions and Select cancellation follow the existing SDK volume arbitration; Start takes priority and opposing brightness directions cancel.
 - Existing `setSystemShortcutsEnabled(false)` disables both volume and brightness system chords.
 - At 0%, Select + Right restores light; the controller remains active and the LCD is not put to sleep by brightness adjustment.
-- Feedback shares the SDK final-presentation overlay transaction. Most recently adjusted visible control wins, shows `Light N%` (compact `L N%` on small displays), and expires after 1.2 seconds. No writes to application/screenshot canvases, no SPI work from the input task.
+- Feedback shares the SDK final-presentation overlay transaction. Most recently adjusted visible control wins, shows a speaker or sun icon with the numeric percentage, including a crossed speaker at mute, and expires after 1.2 seconds. No writes to application/screenshot canvases, no SPI work from the input task.
 - Existing full-screen `display.drawCanvas()` and layered `prepareSystemOverlay()/finishSystemOverlay()` integrations inherit brightness feedback. Applications that bypass SDK presentation APIs must integrate those APIs themselves.
 
 ## Persistence and boot safety
@@ -35,7 +35,7 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 - Namespace `backlight`, uint32 key `level`, independent of audio settings.
 - Hardware updates occur immediately. A 3072-byte-stack settings worker coalesces saves after 600 ms without a changed value. No NVS calls while handling input or holding the hardware mutex; failed writes retry with a 1-second delay. Concurrent later changes remain dirty.
 - Missing settings default to 100; invalid high values clamp to 100.
-- **Saved 0 loads as 5% on boot**, so a powered-on device does not look dead. Setting 0 during use still fully darkens the backlight.
+- **RAM 0 remains 0, but persistence writes 5**, so reboot/reset does not restore a black screen. Legacy stored 0 still loads as 5 for compatibility. Coalesced writes remain deferred; before they complete, the earlier saved nonzero level can still be restored.
 - PWM is configured during board initialization, before the welcome screen and controller task, not attached by a later application.
 - LEDC/task-creation failure restores GPIO46 HIGH and leaves the feature disabled.
 
@@ -45,6 +45,21 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 - Keira's GPIO manager and Lua/mJS PWM wrappers reject use of the reserved timer when enabled; wrappers also reject attaching/detaching the backlight pin. Raw application GPIO/LEDC access remains the application's responsibility.
 - Board power-saving calls suspend/resume PWM while preserving the requested level. Stock semantics remain unchanged. Those calls sleep the LCD, not the ESP32; independently biased amplifier SD is not controlled by them.
 - Brightness never changes I²S pins, clocks or ownership. Continued audio and EMI/flicker still require physical testing.
+
+## Shared Display settings and idle-off
+
+`lilka::displaySettings.begin()` is called by Keira and Lilplayer after `lilka::begin()`. Doom does not opt into automatic idle-off.
+
+- Public NVS constants live in `display_settings.h`: namespace `backlight`, brightness key `level`, timeout key `timeoutSeconds`. Both applications use these exact SDK APIs and keys, not private copies.
+- Timeout defaults to **120 seconds (2 min)**. Menu presets: Never (0), 30 sec, 1/2/5/10 min. API values are clamped to 0..3600 seconds; invalid stored values fall back to 120.
+- `getTimeoutSeconds()` reads RAM; `setTimeoutSeconds()` updates RAM and a separate 3072-byte-stack worker saves after 600 ms quiet, retrying failures. No NVS work on input/render paths.
+- Keira: Settings -> Display, brightness and Auto-off controls. Up/Down selects; Left/Right or D/A adjusts. The menu disables its usual horizontal paging so adjustment cannot also switch rows.
+- Lilplayer: Settings -> Display with the same values and controls. English/Ukrainian labels are provided in both applications.
+- Automatic off is allowed only on Keira's Launcher, or Lilplayer stopped/paused/finished/error with no load, scan, resume prompt, retry or seek pending. Playing/connecting and foreground Keira applications inhibit the timer. Background services continue; this is not a claim that all RTOS tasks stop.
+- Physical input (including held/consumed keys) renews activity. The first wake gesture is consumed until **all** its buttons are released, preventing late chord keys from activating a setting or launching something.
+- `serviceIdle(eligible)` runs only on the LCD owner task. It invokes board LCD/backlight sleep/wake, never MCU sleep. Render loops skip LCD transfers while off and repaint after wake; audio, storage and services continue.
+- The idle comparison treats a concurrently newer input timestamp as future activity, not an unsigned timeout overflow; rollover and the exact timeout boundary are tested.
+- Settings-task allocation failure disables auto-off safely and presents unavailable controls/logging. Stock boards can use idle-off while idle; independent PWM remains modified-hardware-only.
 
 ## Staging-based consumers
 
@@ -59,7 +74,9 @@ Keira uses its normal launcher, status bar and services. The earlier test intent
 Passed:
 
 - `python3 tests/backlight/run.py`: actual brightness source with host GPIO/LEDC/NVS/task stubs, modified/stock/v1 gates, PWM/task failure fallback, clamp and overflow, zero recovery, save coalescing/retry/concurrent revisions, sleep restoration and chord tests; normal and ASan/UBSan runs.
-- `python3 tests/system_shortcuts/run.py`: existing real Controller/Audio regressions and real-font overlay tests; added brightness full-frame/scanline equivalence at 0/50/100 and native-size previews visually inspected.
+- `python3 tests/system_shortcuts/run.py`: real Controller/Audio regressions, compound wake-gesture consumption, and real-font speaker/sun full-frame/scanline equivalence at 0/50/100. Native-size icons and both application Display menus visually inspected (host HAL).
+- `python3 tests/display_settings/run.py`: actual shared settings code; inactivity eligibility, boundaries, concurrent newer input, held keys, wake, disabled timeout, persistence/retry/concurrent revisions, allocation failure and rollover, normal and ASan/UBSan.
+- `python3 tests/menu/run.py --sanitize`: horizontal-paging opt-out preserves default behaviour and does not page on setting adjustment. General stage still has the old sequence-point warning; its independent fix is published on `fix/menu-page-up-safety`, not bundled here.
 - `python3 tests/upstream_compatibility.py`. Source-radio compatibility tests were run before the base correction; the compatibility changes belong to stage-lilplayer, not this generic SDK feature.
 - Installed ESP32-S3 toolchain/header **syntax-only** checks of changed SDK sources and Keira PWM wrappers with the gate both off/on; no object/link outputs.
 - Keira localization script, Doom presentation/volume host regressions, Lilplayer dependency/radio-profile and production UI host regressions.

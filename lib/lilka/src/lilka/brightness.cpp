@@ -1,5 +1,6 @@
 #include "brightness.h"
 #include "config.h"
+#include "display_settings.h"
 
 #if LILKA_VERSION == 2 && LILKA_INDEPENDENT_BACKLIGHT
 #include <driver/ledc.h>
@@ -64,8 +65,8 @@ bool Brightness::begin() {
     if (!hardwareMutex) return false;
     Preferences prefs;
     uint32_t stored = 100;
-    if (prefs.begin("backlight", true)) {
-        stored = prefs.getUInt("level", 100);
+    if (prefs.begin(LILKA_DISPLAY_NVS_NAMESPACE, true)) {
+        stored = prefs.getUInt(LILKA_DISPLAY_NVS_BRIGHTNESS_KEY, 100);
         prefs.end();
     }
     // A saved off state must not make the next boot appear dead.
@@ -131,7 +132,7 @@ bool Brightness::changeBrightnessLive(int delta) {
 }
 bool Brightness::stepBrightnessShortcut(int steps) {
     if (!steps) return false;
-    const int delta = steps > 10 ? 100 : (steps < -10 ? -100 : steps * 10);
+    const int delta = steps > 20 ? 100 : (steps < -20 ? -100 : steps * 5);
     return update(delta, true, true);
 }
 
@@ -167,8 +168,9 @@ void Brightness::servicePersistence() {
     portEXIT_CRITICAL(&snapshotMux);
     if (pending == savedRevision || millis() - when < 600) return;
     Preferences prefs;
-    const bool opened = prefs.begin("backlight", false);
-    const bool saved = opened && prefs.putUInt("level", level) == sizeof(uint32_t);
+    const bool opened = prefs.begin(LILKA_DISPLAY_NVS_NAMESPACE, false);
+    const bool saved =
+        opened && prefs.putUInt(LILKA_DISPLAY_NVS_BRIGHTNESS_KEY, level == 0 ? 5 : level) == sizeof(uint32_t);
     if (opened) prefs.end();
     if (saved) savedRevision = pending; // Concurrent later revisions stay dirty.
     else vTaskDelay(pdMS_TO_TICKS(1000));

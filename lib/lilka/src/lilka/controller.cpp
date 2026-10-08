@@ -6,6 +6,7 @@
 #include "controller.h"
 #include "audio.h"
 #include "brightness.h"
+#include "display_settings.h"
 
 namespace lilka {
 
@@ -43,6 +44,13 @@ Controller::Controller() : state{}, semaphore(xSemaphoreCreateRecursiveMutex()) 
 
 int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
     AcquireController acquire(semaphore);
+    displaySettings.noteInput(rawPressed, now);
+    if (displaySettings.isSleeping() || displaySettings.wakePending() || wakeSuppressed) {
+        wakeSuppressed |= rawPressed;
+    }
+    const uint16_t hiddenWake = wakeSuppressed;
+    if (!rawPressed) wakeSuppressed = 0;
+    rawPressed &= ~hiddenWake; // Consume the wake gesture through physical release.
     // Debounce a complete physical snapshot BEFORE chord arbitration or dispatch.
     // Visible state cannot serve as physical history: consumed buttons stay invisible.
     for (int i = 0; i < Button::ANY; ++i) {
