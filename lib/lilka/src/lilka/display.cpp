@@ -1,3 +1,4 @@
+#include "brightness.h"
 #include "display.h"
 
 #include "default_splash.h"
@@ -238,7 +239,12 @@ void Display::presentCanvas(Canvas* canvas) {
     GFX<Display>::drawCanvas(canvas);
 }
 
-bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& state, uint32_t now) {
+bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& incoming, uint32_t now) {
+    VolumeOverlaySnapshot state = incoming;
+    const auto light = brightness.getOverlay();
+    if (light.visible(now) && (!state.visible(now) || now - light.adjustedAt < now - state.adjustedAt)) {
+        state = light;
+    }
     const bool rotated = overlayWidth != width() || overlayHeight != height() || overlayRotation != getRotation();
     const auto geometry = volumeOverlayGeometry(width(), height());
     const bool active = state.visible(now) && geometry.width && width() <= overlayRowWidth;
@@ -247,7 +253,9 @@ bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& state, uint32_t 
     if (rotated) overlayClip = {};
     const bool labelChanged =
         !level && std::memcmp(overlayState.muteLabel, state.muteLabel, sizeof(state.muteLabel)) != 0;
-    overlayChanged = active && (!overlayActive || rotated || overlayLevel != level || labelChanged);
+    overlayChanged = active &&
+                     (!overlayActive || rotated || overlayLevel != level || labelChanged ||
+                      overlayState.brightness != state.brightness);
     if (active) overlayClip = geometry;
     overlayState = state;
     overlayActive = active;
