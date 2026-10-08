@@ -70,7 +70,7 @@ int main(int argc,char** argv){
  assert(!brightness.isPWMChannelReserved(5));
  brightness.setBrightness(100);assert(duty==256&&writes==0);
  brightness.setBrightness(0);assert(duty==0);brightness.stepBrightnessShortcut(1);
- assert(brightness.getBrightness()==10);brightness.stepBrightnessShortcut(-1);assert(brightness.getBrightness()==0);
+ assert(brightness.getBrightness()==5);brightness.stepBrightnessShortcut(-1);assert(brightness.getBrightness()==0);
  brightness.changeBrightnessLive(INT_MAX);assert(brightness.getBrightness()==100);
  brightness.changeBrightnessLive(INT_MIN);assert(brightness.getBrightness()==0);
  brightness.setBrightness(60);assert(brightness.suspend()&&duty==0);
@@ -84,6 +84,7 @@ int main(int argc,char** argv){
  failSave=false;brightness.servicePersistence();assert(stored==40);
  brightness.setBrightness(50);now+=601;writeHook=[](){lilka::brightness.setBrightness(70);};brightness.servicePersistence();assert(stored==50);
  now+=601;brightness.servicePersistence();assert(stored==70);
+ brightness.setBrightness(0);now+=601;brightness.servicePersistence();assert(stored==5&&brightness.getBrightness()==0&&duty==0);
 #else
  assert(!brightness.begin()&&!brightness.isEnabled());
  assert(!brightness.setBrightness(0)&&brightness.getBrightness()==100&&reads==0&&writes==0);
@@ -105,7 +106,7 @@ int main(int argc,char** argv){
 '''
 with tempfile.TemporaryDirectory(prefix='lilka-backlight-') as directory:
     tmp = Path(directory)
-    for name in ('brightness.cpp','brightness.h','config.h','volume_overlay.h','system_shortcuts.h'):
+    for name in ('brightness.cpp','brightness.h','config.h','volume_overlay.h','system_shortcuts.h','display_settings.h'):
         (tmp/name).write_text((SOURCE/name).read_text())
     (tmp/'mock.h').write_text(MOCK)
     (tmp/'regression.cpp').write_text(TEST)

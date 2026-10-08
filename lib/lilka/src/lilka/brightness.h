@@ -22,7 +22,7 @@ public:
     static bool setBrightness(int level);
     /// Bounded relative adjustment; no NVS or display work on this path.
     static bool changeBrightnessLive(int delta);
-    /// Ten percentage points per signed shortcut step, including limit feedback.
+    /// Five percentage points per signed shortcut step, including limit feedback.
     static bool stepBrightnessShortcut(int steps);
     /// Coherent feedback snapshot, consumed by the SDK display renderer.
     static VolumeOverlaySnapshot getOverlay();

@@ -112,7 +112,27 @@ void marqueeHeader() {
 }
 } // namespace
 
+void horizontalSettingsTests() {
+    lilka::Menu menu("Display");
+    menu.addItem("Brightness");
+    menu.addItem("Auto-off");
+    menu.setHorizontalNavigationEnabled(false);
+    lilka::controller.state = {};
+    lilka::controller.state.right.justPressed = true;
+    menu.update();
+    check(menu.getCursor() == 0, "setting adjustment does not page right");
+    menu.setCursor(1);
+    lilka::controller.state = {};
+    lilka::controller.state.left.justPressed = true;
+    menu.update();
+    check(menu.getCursor() == 1, "setting adjustment does not page left");
+    menu.setHorizontalNavigationEnabled(true);
+    menu.update();
+    check(menu.getCursor() == 0, "default horizontal navigation can be restored");
+    lilka::controller.state = {};
+}
 int main() {
+    horizontalSettingsTests();
     variants();
     scrolling();
     marqueeHeader();
