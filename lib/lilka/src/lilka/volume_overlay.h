@@ -12,6 +12,7 @@ struct VolumeOverlaySnapshot {
     int level = 0;
     uint32_t adjustedAt = 0;
     bool valid = false;
+    bool brightness = false;
     /// Owned UTF-8 BMP label (31 bytes + terminator). Standalone default.
     /// Label changes do not renew the feedback timeout.
     char muteLabel[32] = "Mute";
@@ -120,14 +121,12 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     if (filled) target.fillRect(g.barX + 2, g.barY + 2, filled, g.barHeight - 4, cyan);
     char text[5] = {};
     int count = 0;
-    if (level) {
-        if (level == 100) text[count++] = '1';
-        if (level >= 10) text[count++] = '0' + (level / 10) % 10;
-        text[count++] = '0' + level % 10;
-        text[count++] = '%';
-    }
-    const char* label = level ? text : state.muteLabel;
-    const size_t capacity = level ? sizeof(text) : sizeof(state.muteLabel);
+    if (level == 100) text[count++] = '1';
+    if (level >= 10) text[count++] = '0' + (level / 10) % 10;
+    text[count++] = '0' + level % 10;
+    text[count++] = '%';
+    const char* label = text;
+    const size_t capacity = sizeof(text);
     VolumeOverlayFontTarget<Target> context{};
     context.target = &target;
     auto& decoder = context.decoder;
@@ -148,9 +147,33 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     uint16_t glyph;
     while ((glyph = volumeOverlayNextGlyph(label, capacity, offset)))
         advance += u8g2_GetGlyphWidth(&decoder, glyph);
-    // Narrow targets clip inside the panel, never outside its border.
-    int x = g.x + (g.width - advance) / 2;
-    if (x < g.x + 2) x = g.x + 2;
+    // Centre a compact icon + numeric percentage, with no language-dependent words.
+    const int iconX = g.x + (g.width - advance - 26) / 2;
+    const int iconY = g.y + 17;
+    if (state.brightness) {
+        for (int y = -4; y <= 4; ++y)
+            for (int x = -4; x <= 4; ++x) {
+                const int distance = x * x + y * y;
+                if (distance >= 9 && distance <= 16) target.fillRect(iconX + 9 + x, iconY + 9 + y, 1, 1, white);
+            }
+        target.fillRect(iconX + 8, iconY, 2, 3, white);
+        target.fillRect(iconX + 8, iconY + 16, 2, 3, white);
+        target.fillRect(iconX, iconY + 8, 3, 2, white);
+        target.fillRect(iconX + 16, iconY + 8, 3, 2, white);
+        for (int x = 2; x <= 14; x += 12)
+            for (int y = 2; y <= 14; y += 12) target.fillRect(iconX + x, iconY + y, 2, 2, white);
+    } else {
+        target.fillRect(iconX, iconY + 6, 4, 6, white);
+        target.fillRect(iconX + 4, iconY + 4, 2, 10, white);
+        target.fillRect(iconX + 6, iconY + 2, 2, 14, white);
+        if (level) {
+            target.fillRect(iconX + 11, iconY + 5, 2, 8, white);
+            target.fillRect(iconX + 15, iconY + 3, 2, 12, white);
+        } else {
+            for (int i = 0; i < 16; ++i) target.fillRect(iconX + i, iconY + i, 1, 2, white);
+        }
+    }
+    int x = iconX + 26;
     offset = 0;
     while ((glyph = volumeOverlayNextGlyph(label, capacity, offset)))
         x += u8g2_DrawGlyph(&decoder, x, g.y + 32, glyph);

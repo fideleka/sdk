@@ -2,6 +2,8 @@
 #define LILKA_H
 
 #include "lilka/board.h"
+#include "lilka/brightness.h"
+#include "lilka/display_settings.h"
 #include "lilka/serial.h"
 #include "lilka/spi.h"
 #include "lilka/controller.h"
