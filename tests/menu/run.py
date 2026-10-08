@@ -25,7 +25,7 @@ namespace lilka {
     )
     (tmp / "menu.cpp").write_text(args.source.read_text())
     command = [os.environ.get("CXX", "g++"), "-std=c++17", "-Wall", "-Wextra",
-               "-Wno-sign-compare", "-I", str(tmp), "-I", str(ROOT / "tests/menu"),
+               "-Wno-sign-compare", "-Werror=sequence-point", "-I", str(tmp), "-I", str(ROOT / "tests/menu"),
                str(tmp / "menu.cpp"), str(ROOT / "tests/menu/regression.cpp"),
                "-o", str(tmp / "regression")]
     if args.sanitize:
