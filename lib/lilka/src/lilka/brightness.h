@@ -15,7 +15,7 @@ public:
     static bool isEnabled();
     /// Arduino LEDC channels 6/7 share the reserved low-speed timer.
     static bool isPWMChannelReserved(int channel);
-    /// RAM-only brightness query, 0..100. Returns 100 when disabled.
+    /// RAM-only brightness query, 5..100. Returns 100 when disabled.
     static int getBrightness();
     /// Clamped setter; changes hardware immediately, saves after 600 ms idle.
     /// Returns false if unsupported or the hardware update failed.
@@ -29,6 +29,10 @@ public:
     /// Darken/restore without changing the requested or saved brightness.
     static bool suspend();
     static bool resume();
+    /// Hardware-only idle override: selected brightness and NVS remain unchanged.
+    static bool dim();
+    static bool undim();
+    static bool isDimmed();
 
 private:
     static void servicePersistence();

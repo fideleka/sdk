@@ -69,10 +69,10 @@ int main(int argc,char** argv){
  assert(brightness.isPWMChannelReserved(6)&&brightness.isPWMChannelReserved(7));
  assert(!brightness.isPWMChannelReserved(5));
  brightness.setBrightness(100);assert(duty==256&&writes==0);
- brightness.setBrightness(0);assert(duty==0);brightness.stepBrightnessShortcut(1);
- assert(brightness.getBrightness()==5);brightness.stepBrightnessShortcut(-1);assert(brightness.getBrightness()==0);
+ brightness.setBrightness(0);assert(duty==13);brightness.stepBrightnessShortcut(1);
+ assert(brightness.getBrightness()==10);brightness.stepBrightnessShortcut(-1);assert(brightness.getBrightness()==5);
  brightness.changeBrightnessLive(INT_MAX);assert(brightness.getBrightness()==100);
- brightness.changeBrightnessLive(INT_MIN);assert(brightness.getBrightness()==0);
+ brightness.changeBrightnessLive(INT_MIN);assert(brightness.getBrightness()==5);
  brightness.setBrightness(60);assert(brightness.suspend()&&duty==0);
  brightness.setBrightness(30);assert(duty==0&&brightness.getBrightness()==30);
  assert(brightness.resume()&&duty==77);
@@ -84,7 +84,13 @@ int main(int argc,char** argv){
  failSave=false;brightness.servicePersistence();assert(stored==40);
  brightness.setBrightness(50);now+=601;writeHook=[](){lilka::brightness.setBrightness(70);};brightness.servicePersistence();assert(stored==50);
  now+=601;brightness.servicePersistence();assert(stored==70);
- brightness.setBrightness(0);now+=601;brightness.servicePersistence();assert(stored==5&&brightness.getBrightness()==0&&duty==0);
+ brightness.setBrightness(0);now+=601;brightness.servicePersistence();assert(stored==5&&brightness.getBrightness()==5&&duty==13);
+ brightness.setBrightness(75);now+=601;brightness.servicePersistence();const int savedWrites=writes;
+ assert(brightness.dim()&&brightness.isDimmed()&&duty==13&&brightness.getBrightness()==75);
+ now+=601;brightness.servicePersistence();assert(writes==savedWrites&&stored==75);
+ assert(brightness.undim()&&!brightness.isDimmed()&&duty==191);
+ assert(brightness.dim()&&brightness.suspend()&&duty==0&&!brightness.isDimmed());
+ assert(brightness.resume()&&duty==191);
 #else
  assert(!brightness.begin()&&!brightness.isEnabled());
  assert(!brightness.setBrightness(0)&&brightness.getBrightness()==100&&reads==0&&writes==0);
