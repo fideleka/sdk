@@ -5,6 +5,8 @@
 #include "serial.h"
 #include "controller.h"
 #include "audio.h"
+#include "brightness.h"
+#include "display_settings.h"
 
 namespace lilka {
 
@@ -42,6 +44,13 @@ Controller::Controller() : state{}, semaphore(xSemaphoreCreateRecursiveMutex()) 
 
 int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
     AcquireController acquire(semaphore);
+    displaySettings.noteInput(rawPressed, now);
+    if (displaySettings.isSleeping() || displaySettings.wakePending() || wakeSuppressed) {
+        wakeSuppressed |= rawPressed;
+    }
+    const uint16_t hiddenWake = wakeSuppressed;
+    if (!rawPressed) wakeSuppressed = 0;
+    rawPressed &= ~hiddenWake; // Consume the wake gesture through physical release.
     // Debounce a complete physical snapshot BEFORE chord arbitration or dispatch.
     // Visible state cannot serve as physical history: consumed buttons stay invisible.
     for (int i = 0; i < Button::ANY; ++i) {
@@ -54,7 +63,10 @@ int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
     // A raw Start press wins even during its debounce window. A raw Select
     // release stops adjustments immediately, without changing normal Select events.
     uint16_t shortcutPressed = physicalPressed | (rawPressed & (1 << START));
-    auto adjustment = shortcuts.scan(shortcutPressed, now, systemShortcutsEnabled, rawPressed & (1 << SELECT));
+    auto adjustment = shortcuts.scan(
+        shortcutPressed, now, systemShortcutsEnabled, rawPressed & (1 << SELECT), brightness.isEnabled()
+    );
+    brightnessSteps = adjustment.brightnessSteps;
     _StateButtons& buttons = *reinterpret_cast<_StateButtons*>(&state);
     state.selectHeld = physicalPressed & (1 << SELECT);
     state.selectConsumed = adjustment.selectConsumed;
@@ -102,8 +114,7 @@ int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
         if (handlers[i] != NULL) handlers[i](pressed);
         if (globalHandler != NULL) globalHandler((Button)i, pressed);
     }
-    // Brightness chords remain ordinary: v2 has no independent backlight
-    // control: GPIO46 also shuts down MAX98357. Never PWM that shared sleep line.
+    // Modified hardware only; PWM/NVS updates are outside the controller mutex.
     return adjustment.volumeSteps * 5;
 }
 
@@ -117,6 +128,7 @@ void Controller::inputTask() {
         // Atomic RAM-only update, outside controller mutex. Persistence is serviced
         // on the audio settings task, never in this scan or an application callback.
         if (volumeDelta) audio.stepVolumeShortcut(volumeDelta);
+        if (brightnessSteps) brightness.stepBrightnessShortcut(brightnessSteps);
         vTaskDelay(5 / portTICK_PERIOD_MS);
     }
 }

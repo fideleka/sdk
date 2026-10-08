@@ -16,6 +16,7 @@ extern bool hostHotScan, hostWriteFailure;
 extern uint32_t hostStoredVolume;
 extern void (*hostWriteHook)();
 constexpr int portMAX_DELAY = -1;
+constexpr int pdPASS = 1;
 constexpr int portTICK_PERIOD_MS = 1;
 constexpr int INPUT_PULLUP = 1;
 #define pdMS_TO_TICKS(ms) (ms)
@@ -30,9 +31,10 @@ inline void vTaskDelay(int) {}
 inline void vTaskDelete(void*) {}
 inline void pinMode(int, int) {}
 inline int digitalRead(int) { return 1; }
-inline void xTaskCreate(void (*)(void*), const char*, int, void*, int, TaskHandle_t* task) {
+inline int xTaskCreate(void (*)(void*), const char*, int, void*, int, TaskHandle_t* task) {
     ++hostTaskCount;
     if (task) *task = reinterpret_cast<void*>(1);
+    return pdPASS;
 }
 inline void xTaskCreatePinnedToCore(void (*fn)(void*), const char* name, int stack, void* arg,
                                   int priority, TaskHandle_t* task, int) {
@@ -54,17 +56,21 @@ struct MockI2S {
 extern MockI2S I2S;
 class Preferences {
 public:
+    bool backlight = false;
     bool begin(const char* name, bool) {
         assert(!hostHotScan);
-        assert(strcmp(name, "sound") == 0);
+        backlight = strcmp(name, "backlight") == 0;
+        assert(backlight || strcmp(name, "sound") == 0);
         return true;
     }
-    uint32_t getUInt(const char* key, uint32_t) {
+    uint32_t getUInt(const char* key, uint32_t fallback) {
+        if (backlight) return fallback;
         assert(strcmp(key, "volumeLevel") == 0);
         ++hostReads;
         return hostStoredVolume;
     }
     size_t putUInt(const char* key, uint32_t value) {
+        if (backlight) return sizeof(value);
         assert(strcmp(key, "volumeLevel") == 0);
         ++hostWrites;
         if (hostWriteHook) { auto hook = hostWriteHook; hostWriteHook = nullptr; hook(); }

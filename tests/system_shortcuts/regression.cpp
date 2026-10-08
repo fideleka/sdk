@@ -6,6 +6,7 @@
 #define private public
 #include "controller.h"
 #include "audio.h"
+#include "display_settings.h"
 #undef private
 
 uint32_t hostNow = 0, hostStoredVolume = 50;
@@ -378,6 +379,41 @@ void persistenceTests() {
     assert(hostStoredVolume == 40);
     puts("RAM gain/mute/bounds/public setters/NVS coalescing/failure/concurrent write/wrap PASS");
 }
+void idleWakeTests() {
+    Controller controller;
+    hostNow = 1000;
+    assert(displaySettings.begin());
+    assert(displaySettings.getTimeoutSeconds() == 0);
+    assert(displaySettings.getDimTimeoutSeconds() == 0);
+    assert(displaySettings.setTimeoutSeconds(120));
+    hostNow = 121000;
+    displaySettings.serviceIdle(false); // Active application restarts the idle clock.
+    assert(!displaySettings.isSleeping());
+    hostNow = 240999;
+    displaySettings.serviceIdle(true);
+    assert(!displaySettings.isSleeping());
+    ++hostNow;
+    displaySettings.serviceIdle(true);
+    assert(displaySettings.isSleeping());
+    events.clear();
+    scan(controller, 1 << A, hostNow + 20);
+    assert(displaySettings.wakePending() && !controller.peekState().a.pressed);
+    assert(displaySettings.serviceIdle(true) && !displaySettings.isSleeping());
+    scan(controller, 1 << A, hostNow + 20);
+    assert(!controller.peekState().a.pressed); // Held wake key cannot activate anything.
+    scan(controller, (1 << A) | (1 << RIGHT), hostNow + 20);
+    assert(!controller.peekState().a.pressed && !controller.peekState().right.pressed);
+    scan(controller, 1 << RIGHT, hostNow + 20);
+    assert(!controller.peekState().right.pressed); // Entire compound wake gesture stays consumed.
+    scan(controller, 0, hostNow + 20);
+    scan(controller, 1 << A, hostNow + 20);
+    assert(controller.peekState().a.justPressed);
+    assert(displaySettings.setTimeoutSeconds(0));
+    hostNow += 1000000;
+    displaySettings.serviceIdle(true);
+    assert(!displaySettings.isSleeping());
+    puts("Actual Controller idle eligibility, timeout boundary, held wake-key consumption and disabled timeout PASS");
+}
 int main() {
     assert(audio.getVolume() == 50 && hostReads == 1);
     for (int i = 0; i < 100; ++i) assert(audio.getVolume() == 50);
@@ -390,5 +426,6 @@ int main() {
     gentleShortcutTests();
     persistenceTests();
     assert(hostReads == 1);
+    idleWakeTests();
     puts("real Controller + Audio host regression PASS");
 }
