@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <vector>
 
 using namespace lilka;
@@ -109,7 +110,44 @@ void test(int width, int height) {
         tails[1]
     );
 }
+void testBrightness(int width, int height, int level) {
+    const auto g = volumeOverlayGeometry(width, height);
+    VolumeOverlaySnapshot state;
+    state.valid = true;
+    state.brightness = true;
+    state.level = level;
+    state.adjustedAt = 100;
+    Image full(width, height), rows(width, height);
+    drawVolumeOverlay(full, state, width, height, 100);
+    for (int y = g.y; y < g.y + g.height; ++y) {
+        std::vector<uint16_t> scratch(g.width + 2, 0x4321);
+        VolumeOverlayRow row{scratch.data() + 1, g.x, y, g.width};
+        drawVolumeOverlay(row, state, width, height, 100);
+        assert(scratch.front() == 0x4321 && scratch.back() == 0x4321);
+        for (int x = 0; x < g.width; ++x) rows.pixels[y * width + g.x + x] = scratch[x + 1];
+    }
+    assert(full.pixels == rows.pixels);
+    if (const char* directory = std::getenv("BRIGHTNESS_PREVIEW_DIR")) {
+        char name[256];
+        std::snprintf(name, sizeof(name), "%s/light-%dx%d-%d.ppm", directory, width, height, level);
+        FILE* file = std::fopen(name, "wb");
+        assert(file);
+        std::fprintf(file, "P6\n%d %d\n255\n", width, height);
+        for (auto pixel : full.pixels) {
+            unsigned char rgb[] = {static_cast<unsigned char>(((pixel >> 11) & 31) * 255 / 31),
+                                   static_cast<unsigned char>(((pixel >> 5) & 63) * 255 / 63),
+                                   static_cast<unsigned char>((pixel & 31) * 255 / 31)};
+            std::fwrite(rgb, 1, 3, file);
+        }
+        std::fclose(file);
+    }
+}
+
 int main() {
+    for (int level : {0, 50, 100}) {
+        testBrightness(280, 240, level);
+        testBrightness(128, 128, level);
+    }
     test(280, 240);
     test(240, 280);
     test(128, 128);

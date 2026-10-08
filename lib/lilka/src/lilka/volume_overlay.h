@@ -12,6 +12,7 @@ struct VolumeOverlaySnapshot {
     int level = 0;
     uint32_t adjustedAt = 0;
     bool valid = false;
+    bool brightness = false;
     /// Owned UTF-8 BMP label (31 bytes + terminator). Standalone default.
     /// Label changes do not renew the feedback timeout.
     char muteLabel[32] = "Mute";
@@ -118,16 +119,20 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     const int level = state.level < 0 ? 0 : (state.level > 100 ? 100 : state.level);
     const int filled = (g.barWidth - 4) * level / 100;
     if (filled) target.fillRect(g.barX + 2, g.barY + 2, filled, g.barHeight - 4, cyan);
-    char text[5] = {};
+    char text[16] = {};
     int count = 0;
-    if (level) {
+    if (state.brightness) {
+        const char* prefix = g.width < 120 ? "L " : "Light ";
+        while (*prefix) text[count++] = *prefix++;
+    }
+    if (level || state.brightness) {
         if (level == 100) text[count++] = '1';
         if (level >= 10) text[count++] = '0' + (level / 10) % 10;
         text[count++] = '0' + level % 10;
         text[count++] = '%';
     }
-    const char* label = level ? text : state.muteLabel;
-    const size_t capacity = level ? sizeof(text) : sizeof(state.muteLabel);
+    const char* label = (level || state.brightness) ? text : state.muteLabel;
+    const size_t capacity = (level || state.brightness) ? sizeof(text) : sizeof(state.muteLabel);
     VolumeOverlayFontTarget<Target> context{};
     context.target = &target;
     auto& decoder = context.decoder;
