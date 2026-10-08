@@ -383,7 +383,9 @@ void idleWakeTests() {
     Controller controller;
     hostNow = 1000;
     assert(displaySettings.begin());
-    assert(displaySettings.getTimeoutSeconds() == 120);
+    assert(displaySettings.getTimeoutSeconds() == 0);
+    assert(displaySettings.getDimTimeoutSeconds() == 0);
+    assert(displaySettings.setTimeoutSeconds(120));
     hostNow = 121000;
     displaySettings.serviceIdle(false); // Active application restarts the idle clock.
     assert(!displaySettings.isSleeping());

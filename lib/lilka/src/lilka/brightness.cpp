@@ -16,6 +16,7 @@ namespace {
 constexpr ledc_mode_t mode = LEDC_LOW_SPEED_MODE;
 constexpr ledc_channel_t channel = LEDC_CHANNEL_7;
 std::atomic<bool> enabled{false};
+std::atomic<bool> idleDimmed{false};
 std::atomic<int> requested{100};
 SemaphoreHandle_t hardwareMutex = nullptr;
 portMUX_TYPE snapshotMux = portMUX_INITIALIZER_UNLOCKED;
@@ -24,7 +25,7 @@ bool sleeping = false;
 uint32_t revision = 0, changedAt = 0, savedRevision = 0;
 
 int clamp(int64_t value) {
-    return value < 0 ? 0 : (value > 100 ? 100 : static_cast<int>(value));
+    return value < 5 ? 5 : (value > 100 ? 100 : static_cast<int>(value));
 }
 
 bool apply(int level) {
@@ -41,6 +42,7 @@ bool update(int value, bool relative, bool showFeedback) {
         xSemaphoreGive(hardwareMutex);
         return false;
     }
+    idleDimmed.store(false);
     portENTER_CRITICAL(&snapshotMux);
     if (next != requested.load()) {
         requested.store(next);
@@ -70,7 +72,7 @@ bool Brightness::begin() {
         prefs.end();
     }
     // A saved off state must not make the next boot appear dead.
-    const int initial = stored == 0 ? 5 : clamp(stored);
+    const int initial = clamp(stored);
     ledc_timer_config_t timer = {};
     timer.speed_mode = mode;
     timer.timer_num = LEDC_TIMER_3;
@@ -91,6 +93,7 @@ bool Brightness::begin() {
         return false;
     }
     requested.store(initial);
+    if (stored < 5) { ++revision; changedAt = millis(); }
     enabled.store(true);
     // Persistence never runs on the controller/audio task or under hardwareMutex.
     TaskHandle_t task = nullptr;
@@ -147,7 +150,7 @@ bool Brightness::suspend() {
     if (!enabled.load()) return false;
     xSemaphoreTake(hardwareMutex, portMAX_DELAY);
     const bool ok = apply(0);
-    if (ok) sleeping = true;
+    if (ok) { sleeping = true; idleDimmed.store(false); }
     xSemaphoreGive(hardwareMutex);
     return ok;
 }
@@ -156,7 +159,29 @@ bool Brightness::resume() {
     if (!enabled.load()) return false;
     xSemaphoreTake(hardwareMutex, portMAX_DELAY);
     const bool ok = apply(requested.load());
-    if (ok) sleeping = false;
+    if (ok) { sleeping = false; idleDimmed.store(false); }
+    xSemaphoreGive(hardwareMutex);
+    return ok;
+}
+
+bool Brightness::isDimmed() {
+    return idleDimmed.load();
+}
+
+bool Brightness::dim() {
+    if (!enabled.load()) return false;
+    xSemaphoreTake(hardwareMutex, portMAX_DELAY);
+    const bool ok = !sleeping && apply(5);
+    if (ok) idleDimmed.store(true);
+    xSemaphoreGive(hardwareMutex);
+    return ok;
+}
+
+bool Brightness::undim() {
+    if (!enabled.load()) return false;
+    xSemaphoreTake(hardwareMutex, portMAX_DELAY);
+    const bool ok = sleeping || apply(requested.load());
+    if (ok) idleDimmed.store(false);
     xSemaphoreGive(hardwareMutex);
     return ok;
 }
@@ -170,7 +195,7 @@ void Brightness::servicePersistence() {
     Preferences prefs;
     const bool opened = prefs.begin(LILKA_DISPLAY_NVS_NAMESPACE, false);
     const bool saved =
-        opened && prefs.putUInt(LILKA_DISPLAY_NVS_BRIGHTNESS_KEY, level == 0 ? 5 : level) == sizeof(uint32_t);
+        opened && prefs.putUInt(LILKA_DISPLAY_NVS_BRIGHTNESS_KEY, level) == sizeof(uint32_t);
     if (opened) prefs.end();
     if (saved) savedRevision = pending; // Concurrent later revisions stay dirty.
     else vTaskDelay(pdMS_TO_TICKS(1000));
@@ -202,6 +227,9 @@ bool Brightness::changeBrightnessLive(int) {
 bool Brightness::stepBrightnessShortcut(int) {
     return false;
 }
+bool Brightness::isDimmed() { return false; }
+bool Brightness::dim() { return false; }
+bool Brightness::undim() { return false; }
 VolumeOverlaySnapshot Brightness::getOverlay() {
     return {};
 }

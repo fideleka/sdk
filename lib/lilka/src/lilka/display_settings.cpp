@@ -1,5 +1,6 @@
 #include "display_settings.h"
 #include "board.h"
+#include "brightness.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <freertos/FreeRTOS.h>
@@ -9,7 +10,7 @@
 namespace lilka {
 namespace {
 std::atomic<bool> ready{false}, sleeping{false}, pendingWake{false};
-std::atomic<uint32_t> timeout{LILKA_DISPLAY_DEFAULT_TIMEOUT_SECONDS}, lastInput{0};
+std::atomic<uint32_t> timeout{LILKA_DISPLAY_DEFAULT_TIMEOUT_SECONDS}, lastInput{0}, dimTimeout{0};
 portMUX_TYPE settingsMux = portMUX_INITIALIZER_UNLOCKED;
 uint32_t revision = 0, changedAt = 0, savedRevision = 0;
 } // namespace
@@ -17,11 +18,13 @@ uint32_t revision = 0, changedAt = 0, savedRevision = 0;
 bool DisplaySettings::begin() {
     if (ready.load()) return true;
     Preferences prefs;
-    uint32_t seconds = LILKA_DISPLAY_DEFAULT_TIMEOUT_SECONDS;
+    uint32_t seconds = LILKA_DISPLAY_DEFAULT_TIMEOUT_SECONDS, dimSeconds = 0;
     if (prefs.begin(LILKA_DISPLAY_NVS_NAMESPACE, true)) {
         seconds = prefs.getUInt(LILKA_DISPLAY_NVS_TIMEOUT_KEY, LILKA_DISPLAY_DEFAULT_TIMEOUT_SECONDS);
+        dimSeconds = prefs.getUInt(LILKA_DISPLAY_NVS_DIM_KEY, 0);
         prefs.end();
     }
+    dimTimeout.store(dimSeconds > 3600 ? 0 : dimSeconds);
     timeout.store(seconds > 3600 ? LILKA_DISPLAY_DEFAULT_TIMEOUT_SECONDS : seconds);
     lastInput.store(millis());
     TaskHandle_t task = nullptr;
@@ -61,10 +64,29 @@ bool DisplaySettings::setTimeoutSeconds(uint32_t seconds) {
     return true;
 }
 
+uint32_t DisplaySettings::getDimTimeoutSeconds() {
+    return dimTimeout.load();
+}
+
+bool DisplaySettings::setDimTimeoutSeconds(uint32_t seconds) {
+    if (!ready.load()) return false;
+    if (seconds > 3600) seconds = 3600;
+    lastInput.store(millis());
+    portENTER_CRITICAL(&settingsMux);
+    if (seconds != dimTimeout.load()) {
+        dimTimeout.store(seconds);
+        changedAt = millis();
+        ++revision;
+    }
+    portEXIT_CRITICAL(&settingsMux);
+    if (brightness.isDimmed()) pendingWake.store(true);
+    return true;
+}
+
 void DisplaySettings::noteInput(uint16_t pressed, uint32_t now) {
     if (!ready.load() || !pressed) return;
     lastInput.store(now);
-    if (sleeping.load()) pendingWake.store(true);
+    if (sleeping.load() || brightness.isDimmed()) pendingWake.store(true);
 }
 
 bool DisplaySettings::isSleeping() {
@@ -78,7 +100,8 @@ bool DisplaySettings::wakePending() {
 bool DisplaySettings::serviceIdle(bool eligible) {
     if (!ready.load()) return false;
     const uint32_t now = millis();
-    const uint32_t seconds = timeout.load();
+    const uint32_t seconds = timeout.load(), dimSeconds = dimTimeout.load();
+    const int32_t elapsed = static_cast<int32_t>(now - lastInput.load());
     if (sleeping.load()) {
         if (pendingWake.load() || !eligible || !seconds) {
             board.disablePowerSavingMode();
@@ -87,25 +110,34 @@ bool DisplaySettings::serviceIdle(bool eligible) {
             sleeping.store(false);
             return true;
         }
-    } else if (!eligible || !seconds) {
+    } else if (pendingWake.load() || !eligible ||
+               (brightness.isDimmed() && (!dimSeconds || elapsed < static_cast<int32_t>(dimSeconds * 1000)))) {
+        const bool wasDimmed = brightness.isDimmed();
+        if (wasDimmed && !brightness.undim()) return false;
+        pendingWake.store(false);
         lastInput.store(now);
-    } else if (static_cast<int32_t>(now - lastInput.load()) >= static_cast<int32_t>(seconds * 1000)) {
+        return wasDimmed;
+    } else if (seconds && elapsed >= static_cast<int32_t>(seconds * 1000)) {
         // Publish sleep before the LCD transition so a concurrent first button
         // is retained as a wake request and never dispatched to the application.
         sleeping.store(true);
         board.enablePowerSavingMode();
+    } else if (dimSeconds && brightness.isEnabled() && !brightness.isDimmed() &&
+               elapsed >= static_cast<int32_t>(dimSeconds * 1000)) {
+        brightness.dim();
     }
     return false;
 }
 
 void DisplaySettings::servicePersistence() {
     portENTER_CRITICAL(&settingsMux);
-    const uint32_t pending = revision, when = changedAt, value = timeout.load();
+    const uint32_t pending = revision, when = changedAt, value = timeout.load(), dimValue = dimTimeout.load();
     portEXIT_CRITICAL(&settingsMux);
     if (pending == savedRevision || millis() - when < 600) return;
     Preferences prefs;
     const bool opened = prefs.begin(LILKA_DISPLAY_NVS_NAMESPACE, false);
-    const bool saved = opened && prefs.putUInt(LILKA_DISPLAY_NVS_TIMEOUT_KEY, value) == sizeof(uint32_t);
+    const bool saved = opened && prefs.putUInt(LILKA_DISPLAY_NVS_TIMEOUT_KEY, value) == sizeof(uint32_t) &&
+                       prefs.putUInt(LILKA_DISPLAY_NVS_DIM_KEY, dimValue) == sizeof(uint32_t);
     if (opened) prefs.end();
     if (saved) savedRevision = pending;
     else vTaskDelay(pdMS_TO_TICKS(1000));

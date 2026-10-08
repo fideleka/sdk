@@ -12,7 +12,7 @@ Included by `<lilka.h>` and initialized automatically by `lilka::begin()` throug
 
 ```cpp
 lilka::brightness.isEnabled();
-lilka::brightness.getBrightness();           // RAM only, 0..100
+lilka::brightness.getBrightness();           // Selected brightness, RAM only, 5..100
 lilka::brightness.setBrightness(40);         // clamp, apply, deferred save
 lilka::brightness.changeBrightnessLive(-5); // bounded relative change
 lilka::brightness.stepBrightnessShortcut(1);// +5 and feedback
@@ -26,7 +26,7 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 - Repeat starts after 400 ms and proceeds every 100 ms, with no catch-up bursts.
 - Consumed directions and Select cancellation follow the existing SDK volume arbitration; Start takes priority and opposing brightness directions cancel.
 - Existing `setSystemShortcutsEnabled(false)` disables both volume and brightness system chords.
-- At 0%, Select + Right restores light; the controller remains active and the LCD is not put to sleep by brightness adjustment.
+- Selected brightness is clamped to 5..100%; down at 5% remains 5%. Full display-off may still drive PWM to zero, separately from the selected value.
 - Feedback shares the SDK final-presentation overlay transaction. Most recently adjusted visible control wins, shows a speaker or sun icon with the numeric percentage, including a crossed speaker at mute, and expires after 1.2 seconds. No writes to application/screenshot canvases, no SPI work from the input task.
 - Existing full-screen `display.drawCanvas()` and layered `prepareSystemOverlay()/finishSystemOverlay()` integrations inherit brightness feedback. Applications that bypass SDK presentation APIs must integrate those APIs themselves.
 
@@ -35,7 +35,7 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 - Namespace `backlight`, uint32 key `level`, independent of audio settings.
 - Hardware updates occur immediately. A 3072-byte-stack settings worker coalesces saves after 600 ms without a changed value. No NVS calls while handling input or holding the hardware mutex; failed writes retry with a 1-second delay. Concurrent later changes remain dirty.
 - Missing settings default to 100; invalid high values clamp to 100.
-- **RAM 0 remains 0, but persistence writes 5**, so reboot/reset does not restore a black screen. Legacy stored 0 still loads as 5 for compatibility. Coalesced writes remain deferred; before they complete, the earlier saved nonzero level can still be restored.
+- **Minimum selected brightness is 5% in RAM and NVS.** Legacy saved 0..4 loads as 5 and is normalized by the deferred worker. Temporary idle dimming never changes the selected or saved brightness.
 - PWM is configured during board initialization, before the welcome screen and controller task, not attached by a later application.
 - LEDC/task-creation failure restores GPIO46 HIGH and leaves the feature disabled.
 
@@ -50,14 +50,15 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 
 `lilka::displaySettings.begin()` is called by Keira and Lilplayer after `lilka::begin()`. Doom does not opt into automatic idle-off.
 
-- Public NVS constants live in `display_settings.h`: namespace `backlight`, brightness key `level`, timeout key `timeoutSeconds`. Both applications use these exact SDK APIs and keys, not private copies.
-- Timeout defaults to **120 seconds (2 min)**. Menu presets: Never (0), 30 sec, 1/2/5/10 min. API values are clamped to 0..3600 seconds; invalid stored values fall back to 120.
+- Public NVS constants live in `display_settings.h`: namespace `backlight`, brightness key `level`, off-timeout key `timeoutSeconds`, dim-timeout key `dimSeconds`. Both applications use these exact SDK APIs and keys, not private copies.
+- Both timers default to **Never (0)** for missing/invalid settings; valid previously saved choices are retained. Menu presets: Never (0), 30 sec, 1/2/5/10 min. API values are clamped to 0..3600 seconds; invalid stored values fall back to Never.
 - `getTimeoutSeconds()` reads RAM; `setTimeoutSeconds()` updates RAM and a separate 3072-byte-stack worker saves after 600 ms quiet, retrying failures. No NVS work on input/render paths.
-- Keira: Settings -> Display, brightness and Auto-off controls. Up/Down selects; Left/Right or D/A adjusts. The menu disables its usual horizontal paging so adjustment cannot also switch rows.
-- Lilplayer: Settings -> Display with the same values and controls. English/Ukrainian labels are provided in both applications.
+- Keira: Settings -> Display, brightness, Auto-off and Idle dim controls. Up/Down selects; Left/Right or D/A adjusts. The menu disables its usual horizontal paging so adjustment cannot also switch rows.
+- Lilplayer: Settings -> Display with the same three values and controls. English/Ukrainian labels are provided in both applications.
 - Automatic off is allowed only on Keira's Launcher, or Lilplayer stopped/paused/finished/error with no load, scan, resume prompt, retry or seek pending. Playing/connecting and foreground Keira applications inhibit the timer. Background services continue; this is not a claim that all RTOS tasks stop.
 - Physical input (including held/consumed keys) renews activity. The first wake gesture is consumed until **all** its buttons are released, preventing late chord keys from activating a setting or launching something.
 - `serviceIdle(eligible)` runs only on the LCD owner task. It invokes board LCD/backlight sleep/wake, never MCU sleep. Render loops skip LCD transfers while off and repaint after wake; audio, storage and services continue.
+- Optional dim uses the same presets and inactivity/foreground rules, but temporarily applies hardware 5% without changing the selected value, NVS or LCD sleep state. A key gesture or a foreground app restores the selected brightness. Full off has priority when its timeout is reached; waking off also clears the temporary dim override. Disabling dim restores brightness. Input arriving during dim application is recovered on the next owner frame.
 - The idle comparison treats a concurrently newer input timestamp as future activity, not an unsigned timeout overflow; rollover and the exact timeout boundary are tested.
 - Settings-task allocation failure disables auto-off safely and presents unavailable controls/logging. Stock boards can use idle-off while idle; independent PWM remains modified-hardware-only.
 
