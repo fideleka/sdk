@@ -68,7 +68,7 @@ void Menu::update() {
     } else if (horizontalNavigationEnabled && state.left.justPressed) {
         // Scroll PageUp
         if (cursor == 0) cursor = items.size() - 1;
-        else cursor = (cursor - MENU_HEIGHT) <= 0 ? cursor = 0 : (cursor - MENU_HEIGHT);
+        else cursor = (cursor - MENU_HEIGHT) <= 0 ? 0 : (cursor - MENU_HEIGHT);
 
     } else if (horizontalNavigationEnabled && state.right.justPressed) {
         // Scroll PageDown
