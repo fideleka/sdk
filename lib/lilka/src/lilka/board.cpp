@@ -1,6 +1,7 @@
 #include <Arduino.h>
 
 #include "board.h"
+#include "brightness.h"
 #include "display.h"
 #include "config.h"
 
@@ -17,19 +18,22 @@ void Board::begin() {
     }
     pinMode(LILKA_SLEEP, OUTPUT);
     digitalWrite(LILKA_SLEEP, HIGH);
+    brightness.begin();
 #endif
 }
 
 void Board::enablePowerSavingMode() {
 #if LILKA_VERSION >= 2
-    digitalWrite(LILKA_SLEEP, LOW);
+    if (brightness.isEnabled()) brightness.suspend();
+    else digitalWrite(LILKA_SLEEP, LOW);
 #endif
     display.displayOff();
 }
 
 void Board::disablePowerSavingMode() {
 #if LILKA_VERSION >= 2
-    digitalWrite(LILKA_SLEEP, HIGH);
+    if (brightness.isEnabled()) brightness.resume();
+    else digitalWrite(LILKA_SLEEP, HIGH);
 #endif
     display.displayOn();
 }

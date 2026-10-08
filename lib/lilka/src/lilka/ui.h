@@ -137,6 +137,11 @@ public:
     bool getItem(int16_t index, MenuItem* menuItem);
     /// Отримати індекс обраного пункту меню.
     int16_t getCursor();
+    /// Disable left/right paging when those keys adjust a selected setting.
+    /// Defaults to enabled, preserving existing menu navigation.
+    void setHorizontalNavigationEnabled(bool enabled) {
+        horizontalNavigationEnabled = enabled;
+    }
     /// Очистити меню і зробити його доступним для повторного використання
     void clearItems();
     /// Отримати кількість пунктів меню.
@@ -164,6 +169,7 @@ private:
     String title;
     std::vector<MenuItem> items;
     bool done;
+    bool horizontalNavigationEnabled = true;
     Image* iconImage;
     Canvas* iconCanvas;
     int64_t lastCursorMove;

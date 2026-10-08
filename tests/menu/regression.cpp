@@ -112,7 +112,42 @@ void marqueeHeader() {
 }
 } // namespace
 
+void horizontalSettingsTests() {
+    lilka::Menu menu("Display");
+    menu.addItem("Brightness");
+    menu.addItem("Auto-off");
+    menu.setHorizontalNavigationEnabled(false);
+    lilka::controller.state = {};
+    lilka::controller.state.right.justPressed = true;
+    menu.update();
+    check(menu.getCursor() == 0, "setting adjustment does not page right");
+    menu.setCursor(1);
+    lilka::controller.state = {};
+    lilka::controller.state.left.justPressed = true;
+    menu.update();
+    check(menu.getCursor() == 1, "setting adjustment does not page left");
+    menu.setHorizontalNavigationEnabled(true);
+    menu.update();
+    check(menu.getCursor() == 0, "default horizontal navigation can be restored");
+    lilka::controller.state = {};
+}
+void pageUpSafetyTests() {
+    lilka::Menu menu("Paging");
+    for (int i = 0; i < 12; ++i) menu.addItem("Item");
+    const int initial[] = {0, 1, 5, 6, 11};
+    const int expected[] = {11, 0, 0, 1, 6};
+    for (int i = 0; i < 5; ++i) {
+        menu.setCursor(initial[i]);
+        lilka::controller.state = {};
+        lilka::controller.state.left.justPressed = true;
+        menu.update();
+        check(menu.getCursor() == expected[i], "page-up wrap/clamp/offset semantics");
+    }
+    lilka::controller.state = {};
+}
 int main() {
+    horizontalSettingsTests();
+    pageUpSafetyTests();
     variants();
     scrolling();
     marqueeHeader();

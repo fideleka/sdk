@@ -132,6 +132,8 @@ private:
     uint16_t physicalPressed = 0;
     uint32_t physicalTime[Button::ANY] = {};
     detail::SystemShortcuts shortcuts;
+    int brightnessSteps = 0;
+    uint16_t wakeSuppressed = 0;
     bool systemShortcutsEnabled = true;
     State state;
     int8_t pins[Button::COUNT] = {

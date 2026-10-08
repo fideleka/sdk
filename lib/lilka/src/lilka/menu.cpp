@@ -65,12 +65,12 @@ void Menu::update() {
         if (cursor >= items.size()) {
             cursor = 0;
         }
-    } else if (state.left.justPressed) {
+    } else if (horizontalNavigationEnabled && state.left.justPressed) {
         // Scroll PageUp
         if (cursor == 0) cursor = items.size() - 1;
-        else cursor = (cursor - MENU_HEIGHT) <= 0 ? cursor = 0 : (cursor - MENU_HEIGHT);
+        else cursor = (cursor - MENU_HEIGHT) <= 0 ? 0 : (cursor - MENU_HEIGHT);
 
-    } else if (state.right.justPressed) {
+    } else if (horizontalNavigationEnabled && state.right.justPressed) {
         // Scroll PageDown
         if (cursor == items.size() - 1) cursor = 0;
         else cursor = (cursor + MENU_HEIGHT) >= items.size() - 1 ? items.size() - 1 : (cursor + MENU_HEIGHT);
