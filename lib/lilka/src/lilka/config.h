@@ -1,3 +1,8 @@
+// Explicit opt-in: amplifier SD MUST be physically isolated from GPIO46.
+#ifndef LILKA_INDEPENDENT_BACKLIGHT
+#    define LILKA_INDEPENDENT_BACKLIGHT 0
+#endif
+
 #ifndef LILKA_CONFIG_H
 #define LILKA_CONFIG_H
 

@@ -42,10 +42,13 @@ public:
     /// Увімкнути режим енергозбереження.
     ///
     /// Цей метод вимикає дисплей, підсвітку дисплея та I2S-модуль. Його варто викликати перед входом в режим сну або глибокого сну.
+    /// On modified hardware the independently biased amplifier is not shut down.
+    /// This API sleeps the LCD; it does not itself sleep the ESP32.
     void enablePowerSavingMode();
     /// Вимкнути режим енергозбереження.
     ///
     /// Цей метод вмикає дисплей, підсвітку дисплея та I2S-модуль. Його варто викликати після виходу з режиму сну.
+    /// With independent backlight enabled, restores the requested brightness.
     void disablePowerSavingMode();
     /// Отримати номер GPIO, що відповідає пінові з роз'єму розширення за індексом.
     ///

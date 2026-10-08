@@ -15,7 +15,7 @@ assert "if (volumeDelta) audio.stepVolumeShortcut(volumeDelta);" in (SOURCE / "c
 assert "display" not in (SOURCE / "audio.cpp").read_text()
 with tempfile.TemporaryDirectory(prefix="lilka-shortcuts-") as directory:
     tmp = Path(directory)
-    for name in ("controller.cpp", "controller.h", "audio.cpp", "audio.h", "config.h", "system_shortcuts.h", "volume_overlay.h"):
+    for name in ("controller.cpp", "controller.h", "audio.cpp", "audio.h", "config.h", "system_shortcuts.h", "volume_overlay.h", "brightness.h", "brightness.cpp"):
         (tmp / name).write_text((SOURCE / name).read_text())
     for name in ("Arduino.h", "I2S.h", "Preferences.h", "serial.h", "driver/uart.h",
                  "freertos/FreeRTOS.h", "freertos/semphr.h"):
@@ -33,7 +33,7 @@ const int ping_raw_size = 2;
         command = [os.environ.get("CXX", "g++"), "-std=c++11", "-DLILKA_VERSION=2", "-DLILKA_NO_AUDIO_HELLO",
                    "-Wall", "-Wextra", "-Wno-reorder", "-Wno-unused-parameter", *flags,
                    "-I" + str(tmp), "-I" + str(TEST), "-I" + str(U8G2.parent), str(tmp / "controller.cpp"),
-                   str(tmp / "audio.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
+                   str(tmp / "audio.cpp"), str(tmp / "brightness.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
         subprocess.run(command, check=True)
         subprocess.run([str(tmp / "regression")], check=True)
         # Compile the installed U8g2 decoder and original font asset read-only.
