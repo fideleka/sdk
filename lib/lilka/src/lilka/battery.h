@@ -1,6 +1,10 @@
 #ifndef LILKA_BATTERY_H
 #define LILKA_BATTERY_H
 
+#include <atomic>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include "auto_full_calibration.h"
 #include <stdint.h>
 
 namespace lilka {
@@ -97,6 +101,11 @@ public:
     /// акумулятора залишається незмінною. Калібровка не впливає на readVoltage().
     /// \return true, якщо значення було збережено.
     bool calibrateFullLevel();
+    /// Start the optional 1 Hz charge-status/calibration worker. Called by begin().
+    /// Returns false on stock/v1 hardware or task-creation failure.
+    bool beginChargeMonitoring();
+    /// RAM-only coherent state; no ADC, NVS, allocation or display work.
+    BatteryChargeSnapshot getChargeSnapshot() const;
     /// Скинути збережену калібровку рівня повного заряду.
     void resetFullLevelCalibration();
     /// Перевірити, чи збережено калібровку рівня повного заряду.
@@ -112,10 +121,17 @@ public:
 private:
     float emptyVoltage;
     float fullVoltage;
-    uint16_t fullLevelRawValue;
+    std::atomic<uint16_t> fullLevelRawValue;
     BatteryDischargeProfile dischargeProfile;
 
     float rawValueToVoltage(uint16_t value) const;
+    int estimatedLevelFromRaw(uint16_t rawValue) const;
+    void pollChargeState();
+    void chargeMonitoringTask();
+    TaskHandle_t chargeTask = nullptr;
+    AutoFullCalibration automaticCalibration;
+    mutable portMUX_TYPE chargeMux = portMUX_INITIALIZER_UNLOCKED;
+    BatteryChargeSnapshot chargeSnapshot;
     int levelFromVoltage(float voltage) const;
 };
 

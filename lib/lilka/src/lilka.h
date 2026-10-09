@@ -10,6 +10,7 @@
 #include "lilka/display.h"
 #include "lilka/fileutils.h"
 #include "lilka/battery.h"
+#include "lilka/charge_status.h"
 #include "lilka/buzzer.h"
 #include "lilka/ui.h"
 #include "lilka/multiboot.h"

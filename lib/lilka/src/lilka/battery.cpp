@@ -13,7 +13,6 @@ namespace {
 constexpr char BATTERY_NVS_NAMESPACE[] = "battery";
 constexpr char BATTERY_NVS_FULL_LEVEL_RAW_KEY[] = "fullRawAdc";
 constexpr char BATTERY_NVS_DISCHARGE_PROFILE_KEY[] = "profile";
-constexpr float BATTERY_MIN_FULL_LEVEL_VOLTAGE = 3.5f;
 constexpr uint16_t BATTERY_MAX_RAW_VALUE = 4095;
 constexpr float BATTERY_LEVEL_ROUNDING_EPSILON = 0.0001f;
 constexpr uint32_t BATTERY_ADC_DEFAULT_VREF_MV = 1100;
@@ -82,6 +81,9 @@ void Battery::begin() {
         rawValueToVoltage(savedFullLevelRawValue) >= BATTERY_MIN_FULL_LEVEL_VOLTAGE) {
         fullLevelRawValue = savedFullLevelRawValue;
     }
+    if (LILKA_ADC_CHARGE_STATUS && !beginChargeMonitoring()) {
+        serial.err("Battery charge monitor unavailable");
+    }
 #endif
 }
 
@@ -106,14 +108,19 @@ int Battery::readEstimatedLevel() {
 #if LILKA_VERSION < 2
     return -1;
 #else
-    uint16_t rawValue = readRawValue();
+    return estimatedLevelFromRaw(readRawValue());
+#endif
+}
+
+int Battery::estimatedLevelFromRaw(uint16_t rawValue) const {
     float rawVoltage = rawValueToVoltage(rawValue);
     if (rawVoltage < 0.5f) {
         return -1;
     }
 
-    if (hasFullLevelCalibration()) {
-        float fullLevelVoltage = rawValueToVoltage(fullLevelRawValue);
+    const uint16_t calibratedFull = fullLevelRawValue.load();
+    if (calibratedFull != 0) {
+        float fullLevelVoltage = rawValueToVoltage(calibratedFull);
         float measuredRange = fullLevelVoltage - emptyVoltage;
         if (measuredRange > 0.0f) {
             float configuredRange = fullVoltage - emptyVoltage;
@@ -123,7 +130,6 @@ int Battery::readEstimatedLevel() {
     }
 
     return levelFromVoltage(rawVoltage);
-#endif
 }
 
 BatteryDischargeProfile Battery::getDischargeProfile() const {
@@ -160,16 +166,22 @@ bool Battery::calibrateFullLevel() {
     return false;
 #else
     uint16_t rawValue = readRawValue();
-    if (rawValueToVoltage(rawValue) < BATTERY_MIN_FULL_LEVEL_VOLTAGE) {
+    const float voltage = rawValueToVoltage(rawValue);
+    if (rawValue > BATTERY_MAX_RAW_VALUE || voltage < BATTERY_MIN_FULL_LEVEL_VOLTAGE ||
+        voltage > BATTERY_MAX_VALID_CHARGE_VOLTAGE) {
         return false;
     }
 
-    fullLevelRawValue = rawValue;
     Preferences prefs;
-    prefs.begin(BATTERY_NVS_NAMESPACE, false);
-    prefs.putUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, fullLevelRawValue);
+    if (!prefs.begin(BATTERY_NVS_NAMESPACE, false)) {
+        return false;
+    }
+    const bool saved = prefs.putUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, rawValue) == sizeof(rawValue);
     prefs.end();
-    return true;
+    if (saved) {
+        fullLevelRawValue.store(rawValue);
+    }
+    return saved;
 #endif
 }
 
@@ -247,6 +259,69 @@ void Battery::setFullVoltage(float voltage) {
     fullVoltage = voltage;
 }
 
+bool Battery::beginChargeMonitoring() {
+#if LILKA_VERSION >= 2 && LILKA_ADC_CHARGE_STATUS
+    if (chargeTask) {
+        return true;
+    }
+    if (xTaskCreate(
+            [](void* context) { static_cast<Battery*>(context)->chargeMonitoringTask(); },
+            "batteryCharge",
+            3072,
+            this,
+            1,
+            &chargeTask
+        ) != pdPASS) {
+        chargeTask = nullptr;
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+BatteryChargeSnapshot Battery::getChargeSnapshot() const {
+    portENTER_CRITICAL(&chargeMux);
+    const BatteryChargeSnapshot snapshot = chargeSnapshot;
+    portEXIT_CRITICAL(&chargeMux);
+    return snapshot;
+}
+
+void Battery::pollChargeState() {
+#if LILKA_VERSION >= 2 && LILKA_ADC_CHARGE_STATUS
+    // Exactly one 32-reading median per tick, shared by state and percentages.
+    const uint16_t raw = readRawValue();
+    const float voltage = rawValueToVoltage(raw);
+    const uint32_t now = millis();
+    if (automaticCalibration.update(voltage, now)) {
+        if (calibrateFullLevel()) {
+            serial.log("Battery full-charge reference calibrated after unplugging");
+        } else {
+            serial.err("Battery automatic calibration skipped or save failed");
+        }
+    }
+    BatteryChargeSnapshot snapshot = getChargeSnapshot();
+    snapshot.status = automaticCalibration.getStatus();
+    snapshot.sampleStatus = ChargeStatusFilter::classify(voltage);
+    snapshot.rawVoltage = voltage;
+    if (snapshot.sampleStatus == ChargeStatus::Battery) {
+        snapshot.batteryVoltage = voltage;
+        snapshot.estimatedLevel = estimatedLevelFromRaw(raw);
+    }
+    snapshot.updatedAt = now;
+    portENTER_CRITICAL(&chargeMux);
+    chargeSnapshot = snapshot;
+    portEXIT_CRITICAL(&chargeMux);
+#endif
+}
+
+void Battery::chargeMonitoringTask() {
+    while (true) {
+        pollChargeState();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
 Battery battery;
 
 } // namespace lilka
