@@ -1,6 +1,11 @@
+// Explicit opt-in: requires the 33k/10k optocoupler charging-status modification.
+#ifndef LILKA_ADC_CHARGE_STATUS
+#define LILKA_ADC_CHARGE_STATUS 0
+#endif
+
 // Explicit opt-in: amplifier SD MUST be physically isolated from GPIO46.
 #ifndef LILKA_INDEPENDENT_BACKLIGHT
-#    define LILKA_INDEPENDENT_BACKLIGHT 0
+#define LILKA_INDEPENDENT_BACKLIGHT 0
 #endif
 
 #ifndef LILKA_CONFIG_H
