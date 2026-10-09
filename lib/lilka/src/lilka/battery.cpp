@@ -112,8 +112,9 @@ int Battery::readEstimatedLevel() {
         return -1;
     }
 
-    if (hasFullLevelCalibration()) {
-        float fullLevelVoltage = rawValueToVoltage(fullLevelRawValue);
+    const uint16_t calibratedFull = fullLevelRawValue.load();
+    if (calibratedFull != 0) {
+        float fullLevelVoltage = rawValueToVoltage(calibratedFull);
         float measuredRange = fullLevelVoltage - emptyVoltage;
         if (measuredRange > 0.0f) {
             float configuredRange = fullVoltage - emptyVoltage;
@@ -160,16 +161,21 @@ bool Battery::calibrateFullLevel() {
     return false;
 #else
     uint16_t rawValue = readRawValue();
-    if (rawValueToVoltage(rawValue) < BATTERY_MIN_FULL_LEVEL_VOLTAGE) {
+    const float voltage = rawValueToVoltage(rawValue);
+    if (rawValue > BATTERY_MAX_RAW_VALUE || voltage < BATTERY_MIN_FULL_LEVEL_VOLTAGE || voltage > 4.6f) {
         return false;
     }
 
-    fullLevelRawValue = rawValue;
     Preferences prefs;
-    prefs.begin(BATTERY_NVS_NAMESPACE, false);
-    prefs.putUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, fullLevelRawValue);
+    if (!prefs.begin(BATTERY_NVS_NAMESPACE, false)) {
+        return false;
+    }
+    const bool saved = prefs.putUShort(BATTERY_NVS_FULL_LEVEL_RAW_KEY, rawValue) == sizeof(rawValue);
     prefs.end();
-    return true;
+    if (saved) {
+        fullLevelRawValue.store(rawValue);
+    }
+    return saved;
 #endif
 }
 

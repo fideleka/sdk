@@ -1,6 +1,7 @@
 #ifndef LILKA_BATTERY_H
 #define LILKA_BATTERY_H
 
+#include <atomic>
 #include <stdint.h>
 
 namespace lilka {
@@ -112,7 +113,7 @@ public:
 private:
     float emptyVoltage;
     float fullVoltage;
-    uint16_t fullLevelRawValue;
+    std::atomic<uint16_t> fullLevelRawValue;
     BatteryDischargeProfile dischargeProfile;
 
     float rawValueToVoltage(uint16_t value) const;
