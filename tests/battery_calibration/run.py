@@ -36,13 +36,14 @@ inline void vTaskDelay(int delay) {
   if(now>=70000)throw Done{};
 }
 inline int xTaskCreate(void (*entry)(void*), const char*, int stack, void* context, int, TaskHandle_t* task) {
-  assert(stack == 3072); ++tasks;
+  assert(stack >= 8192); ++tasks;
   if (failTask) return 0;
   taskEntry=entry;taskContext=context;*task=reinterpret_cast<void*>(1);return pdPASS;
 }
 extern uint16_t adcValue, stored;
 extern int reads, writes;
 extern bool failOpen, failWrite;
+extern bool failAdc;
 constexpr int INPUT_PULLDOWN = 1, LILKA_BATTERY_ADC = 3;
 constexpr int LILKA_BATTERY_ADC_CHANNEL = 2;
 constexpr int ADC_ATTEN_DB_11 = 11, ADC_WIDTH_BIT_12 = 12, ADC_UNIT_1 = 1;
@@ -50,7 +51,11 @@ constexpr int ADC_ATTEN_DB_11 = 11, ADC_WIDTH_BIT_12 = 12, ADC_UNIT_1 = 1;
 inline void pinMode(int, int) {}
 inline void config_channel_atten(int, int) {}
 inline void config_width(int) {}
-inline uint16_t analogRead(int) { ++reads; return adcValue; }
+// No analogRead stub: using Arduino's lazy ADC setup must fail this harness.
+inline int get_raw(int channel) {
+  assert(channel == LILKA_BATTERY_ADC_CHANNEL); ++reads;
+  return failAdc ? -1 : adcValue;
+}
 struct esp_adc_cal_characteristics_t {};
 inline int esp_adc_cal_characterize(int, int, int, uint32_t, esp_adc_cal_characteristics_t *) { return 0; }
 inline uint32_t esp_adc_cal_raw_to_voltage(uint32_t value, const esp_adc_cal_characteristics_t *) { return value; }
@@ -87,6 +92,7 @@ void* taskContext=nullptr;
 uint16_t adcValue = 3068, stored = 0;
 int reads = 0, writes = 0;
 bool failOpen = false, failWrite = false;
+bool failAdc = false;
 namespace lilka { MockSerial serial; }
 int main() {
   auto &battery = lilka::battery;
@@ -120,6 +126,14 @@ int main() {
   }
   adcValue = 3000;
   assert(battery.calibrateFullLevel() && stored == 3000 && writes == 3);
+  adcValue = 65535;
+  assert(battery.readRawValue() == 0);
+  assert(!battery.calibrateFullLevel() && stored == 3000 && writes == 3);
+  adcValue = 3000;
+  failAdc = true;
+  assert(battery.readRawValue() == 0);
+  assert(!battery.calibrateFullLevel() && stored == 3000 && writes == 3);
+  failAdc = false;
   assert(battery.readEstimatedLevel() == 100);
   battery.setDischargeProfile(lilka::BatteryDischargeProfile::SharpTop);
   assert(battery.getDischargeProfile() == lilka::BatteryDischargeProfile::SharpTop);

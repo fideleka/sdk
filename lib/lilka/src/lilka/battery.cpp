@@ -16,6 +16,9 @@ constexpr char BATTERY_NVS_DISCHARGE_PROFILE_KEY[] = "profile";
 constexpr uint16_t BATTERY_MAX_RAW_VALUE = 4095;
 constexpr float BATTERY_LEVEL_ROUNDING_EPSILON = 0.0001f;
 constexpr uint32_t BATTERY_ADC_DEFAULT_VREF_MV = 1100;
+// ESP-IDF's xTaskCreate stack argument is bytes, not FreeRTOS words. ADC/NVS
+// driver logging adds deeper call frames in source-built IDF applications.
+constexpr uint32_t BATTERY_CHARGE_TASK_STACK_BYTES = 8192;
 
 esp_adc_cal_characteristics_t batteryAdcCharacteristics;
 
@@ -204,10 +207,16 @@ uint16_t Battery::readRawValue() {
     return 0;
 #else
     // Зчитуємо значення АЦП 32 рази, щоб вибрати медіану
-    uint16_t count = 32;
+    constexpr uint16_t count = 32;
     uint16_t values[count];
     for (int i = 0; i < count; i++) {
-        values[i] = analogRead(LILKA_BATTERY_ADC);
+        // begin() already configured this IDF ADC channel and its 12-bit width.
+        // Avoid Arduino's lazy attach/pinMode/logging path in the worker task.
+        const int raw = LILKA_BATTERY_ADC_FUNC(get_raw)(LILKA_BATTERY_ADC_CHANNEL);
+        if (raw < 0 || raw > BATTERY_MAX_RAW_VALUE) {
+            return 0;
+        }
+        values[i] = static_cast<uint16_t>(raw);
     }
     // Сортуємо масив значень АЦП
     std::sort(values, values + count);
@@ -267,7 +276,7 @@ bool Battery::beginChargeMonitoring() {
     if (xTaskCreate(
             [](void* context) { static_cast<Battery*>(context)->chargeMonitoringTask(); },
             "batteryCharge",
-            3072,
+            BATTERY_CHARGE_TASK_STACK_BYTES,
             this,
             1,
             &chargeTask
