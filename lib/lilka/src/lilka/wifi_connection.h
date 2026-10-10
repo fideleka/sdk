@@ -12,6 +12,7 @@ public:
     enum class State { Idle, Connecting, Scanning, Connected, Failed, NoCredentials };
     static constexpr uint32_t ConnectTimeoutMs = 10000;
     static constexpr uint32_t ScanTimeoutMs = 5000;
+    static constexpr uint32_t RoundTimeoutMs = 35000;
 
     /// Snapshot saved credentials from the open "network" namespace.
     bool load(Preferences& prefs);
@@ -42,6 +43,7 @@ private:
     String selectedPassword;
     State current = State::Idle;
     uint32_t started = 0;
+    uint32_t roundStarted = 0;
     bool scanned = false;
     bool ownsAssociation = false;
     bool ownsScan = false;

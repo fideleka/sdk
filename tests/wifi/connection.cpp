@@ -103,6 +103,26 @@ int main() {
     const unsigned scansBeforeOnly = WiFi.scans;
     assert(selector.poll(10000) == State::Failed);
     assert(WiFi.scans == scansBeforeOnly); // Only saved AP already tried.
+    selector.cancel(true);
+    Preferences::data.clear();
+    assert(NetworkCredentials::save(prefs, "First", "pw"));
+    WiFi.visible.clear();
+    for (unsigned i = 0; i < 6; ++i) {
+        const String name = (std::string("Backup") + std::to_string(i)).c_str();
+        assert(NetworkCredentials::save(prefs, name, "pw", false));
+        WiFi.visible.push_back({name, -40 - int(i)});
+    }
+    assert(selector.load(prefs));
+    WiFi.scanValue = WIFI_SCAN_FAILED;
+    WiFi.scanStart = WiFi.visible.size();
+    const uint32_t budgetStart = UINT32_MAX - 10000;
+    assert(selector.start(budgetStart) == State::Connecting);
+    assert(selector.poll(budgetStart + 10000) == State::Connecting);
+    assert(selector.poll(budgetStart + 20000) == State::Connecting);
+    assert(selector.poll(budgetStart + 30000) == State::Connecting);
+    const size_t budgetAttempts = WiFi.attempts.size();
+    assert(selector.poll(budgetStart + 35000) == State::Failed);
+    assert(WiFi.attempts.size() == budgetAttempts);
     puts(
         "Shared SDK WiFi: preferred, ranked/deduped fallback, open/UTF-8, cancellation, rollover, deadlines, no writes "
         "PASS"
