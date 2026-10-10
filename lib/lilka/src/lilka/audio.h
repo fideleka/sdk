@@ -49,7 +49,7 @@ public:
     static void setStartupSoundEnabled(bool enable);
 
 private:
-    static void serviceVolumePersistence();
+    static uint32_t serviceVolumePersistence();
 };
 
 extern Audio audio;

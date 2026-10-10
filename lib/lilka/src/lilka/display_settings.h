@@ -2,11 +2,11 @@
 
 #include <stdint.h>
 
-#define LILKA_DISPLAY_NVS_NAMESPACE "backlight"
-#define LILKA_DISPLAY_NVS_BRIGHTNESS_KEY "level"
-#define LILKA_DISPLAY_NVS_TIMEOUT_KEY "timeoutSeconds"
+#define LILKA_DISPLAY_NVS_NAMESPACE           "backlight"
+#define LILKA_DISPLAY_NVS_BRIGHTNESS_KEY      "level"
+#define LILKA_DISPLAY_NVS_TIMEOUT_KEY         "timeoutSeconds"
 #define LILKA_DISPLAY_DEFAULT_TIMEOUT_SECONDS 0
-#define LILKA_DISPLAY_NVS_DIM_KEY "dimSeconds"
+#define LILKA_DISPLAY_NVS_DIM_KEY             "dimSeconds"
 
 namespace lilka {
 
@@ -14,7 +14,7 @@ namespace lilka {
 /// Apps opt into idle-off by calling begin() and serviceIdle() on the LCD owner task.
 class DisplaySettings {
 public:
-    /// Load timeout (default Never (0), 0 disables). Creates a deferred-save task.
+    /// Load timeout (default Never (0), 0 disables). Registers with the shared deferred-save worker.
     static bool begin();
     static bool isAvailable();
     static uint32_t getTimeoutSeconds();
@@ -33,7 +33,7 @@ public:
     static bool serviceIdle(bool eligible);
 
 private:
-    static void servicePersistence();
+    static uint32_t servicePersistence();
 };
 
 extern DisplaySettings displaySettings;

@@ -1,15 +1,16 @@
 #include "brightness.h"
+#include "settings_persistence.h"
 #include "config.h"
 #include "display_settings.h"
 
 #if LILKA_VERSION == 2 && LILKA_INDEPENDENT_BACKLIGHT
-#include <driver/ledc.h>
-#include <driver/gpio.h>
-#include <freertos/FreeRTOS.h>
-#include <freertos/semphr.h>
-#include <Preferences.h>
-#include <Arduino.h>
-#include <atomic>
+#    include <driver/ledc.h>
+#    include <driver/gpio.h>
+#    include <freertos/FreeRTOS.h>
+#    include <freertos/semphr.h>
+#    include <Preferences.h>
+#    include <Arduino.h>
+#    include <atomic>
 
 namespace lilka {
 namespace {
@@ -22,7 +23,8 @@ SemaphoreHandle_t hardwareMutex = nullptr;
 portMUX_TYPE snapshotMux = portMUX_INITIALIZER_UNLOCKED;
 VolumeOverlaySnapshot feedback;
 bool sleeping = false;
-uint32_t revision = 0, changedAt = 0, savedRevision = 0;
+uint32_t revision = 0, changedAt = 0, savedRevision = 0, retryAt = 0;
+bool saveFailed = false;
 
 int clamp(int64_t value) {
     return value < 5 ? 5 : (value > 100 ? 100 : static_cast<int>(value));
@@ -43,11 +45,13 @@ bool update(int value, bool relative, bool showFeedback) {
         return false;
     }
     idleDimmed.store(false);
+    bool dirty = false;
     portENTER_CRITICAL(&snapshotMux);
     if (next != requested.load()) {
         requested.store(next);
         ++revision;
         changedAt = millis();
+        dirty = true;
     }
     if (showFeedback) {
         feedback.level = next;
@@ -57,6 +61,7 @@ bool update(int value, bool relative, bool showFeedback) {
     }
     portEXIT_CRITICAL(&snapshotMux);
     xSemaphoreGive(hardwareMutex);
+    if (dirty) detail::SettingsPersistence::notify();
     return true;
 }
 } // namespace
@@ -93,20 +98,13 @@ bool Brightness::begin() {
         return false;
     }
     requested.store(initial);
-    if (stored < 5) { ++revision; changedAt = millis(); }
+    if (stored < 5) {
+        ++revision;
+        changedAt = millis();
+    }
     enabled.store(true);
     // Persistence never runs on the controller/audio task or under hardwareMutex.
-    TaskHandle_t task = nullptr;
-    const BaseType_t created = xTaskCreate(
-        [](void*) {
-            while (1) {
-                Brightness::servicePersistence();
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-        },
-        "backlightSave", 3072, nullptr, 1, &task
-    );
-    if (created != pdPASS) {
+    if (!detail::SettingsPersistence::begin(1, &Brightness::servicePersistence)) {
         enabled.store(false);
         ledc_stop(mode, channel, 1);
         gpio_reset_pin(static_cast<gpio_num_t>(LILKA_SLEEP));
@@ -115,6 +113,7 @@ bool Brightness::begin() {
         requested.store(100);
         return false;
     }
+    if (revision) detail::SettingsPersistence::notify();
     return true;
 }
 
@@ -150,7 +149,10 @@ bool Brightness::suspend() {
     if (!enabled.load()) return false;
     xSemaphoreTake(hardwareMutex, portMAX_DELAY);
     const bool ok = apply(0);
-    if (ok) { sleeping = true; idleDimmed.store(false); }
+    if (ok) {
+        sleeping = true;
+        idleDimmed.store(false);
+    }
     xSemaphoreGive(hardwareMutex);
     return ok;
 }
@@ -159,7 +161,10 @@ bool Brightness::resume() {
     if (!enabled.load()) return false;
     xSemaphoreTake(hardwareMutex, portMAX_DELAY);
     const bool ok = apply(requested.load());
-    if (ok) { sleeping = false; idleDimmed.store(false); }
+    if (ok) {
+        sleeping = false;
+        idleDimmed.store(false);
+    }
     xSemaphoreGive(hardwareMutex);
     return ok;
 }
@@ -186,19 +191,24 @@ bool Brightness::undim() {
     return ok;
 }
 
-void Brightness::servicePersistence() {
+uint32_t Brightness::servicePersistence() {
     portENTER_CRITICAL(&snapshotMux);
     const uint32_t pending = revision, when = changedAt;
     const int level = requested.load();
     portEXIT_CRITICAL(&snapshotMux);
-    if (pending == savedRevision || millis() - when < 600) return;
+    if (pending == savedRevision) return 0;
+    const uint32_t now = millis(), elapsed = now - when;
+    uint32_t wait = elapsed < 600 ? 600 - elapsed : 0;
+    if (saveFailed && static_cast<int32_t>(now - retryAt) < 0 && retryAt - now > wait) wait = retryAt - now;
+    if (wait) return wait;
     Preferences prefs;
     const bool opened = prefs.begin(LILKA_DISPLAY_NVS_NAMESPACE, false);
-    const bool saved =
-        opened && prefs.putUInt(LILKA_DISPLAY_NVS_BRIGHTNESS_KEY, level) == sizeof(uint32_t);
+    const bool saved = opened && prefs.putUInt(LILKA_DISPLAY_NVS_BRIGHTNESS_KEY, level) == sizeof(uint32_t);
     if (opened) prefs.end();
     if (saved) savedRevision = pending; // Concurrent later revisions stay dirty.
-    else vTaskDelay(pdMS_TO_TICKS(1000));
+    saveFailed = !saved;
+    retryAt = millis() + 1000;
+    return saved ? 1 : 1000;
 }
 
 Brightness brightness;
@@ -227,9 +237,15 @@ bool Brightness::changeBrightnessLive(int) {
 bool Brightness::stepBrightnessShortcut(int) {
     return false;
 }
-bool Brightness::isDimmed() { return false; }
-bool Brightness::dim() { return false; }
-bool Brightness::undim() { return false; }
+bool Brightness::isDimmed() {
+    return false;
+}
+bool Brightness::dim() {
+    return false;
+}
+bool Brightness::undim() {
+    return false;
+}
 VolumeOverlaySnapshot Brightness::getOverlay() {
     return {};
 }
@@ -239,7 +255,9 @@ bool Brightness::suspend() {
 bool Brightness::resume() {
     return false;
 }
-void Brightness::servicePersistence() {}
+uint32_t Brightness::servicePersistence() {
+    return 0;
+}
 Brightness brightness;
 } // namespace lilka
 #endif

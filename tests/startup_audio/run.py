@@ -12,7 +12,7 @@ U8G2 = Path(os.environ.get("U8G2_CLIB", ROOT.parent / "lilka-sdk/lib/lilka/.pio/
 assert (U8G2 / "u8g2.h").is_file(), "Set U8G2_CLIB to an existing read-only dependency directory"
 with tempfile.TemporaryDirectory(prefix="lilka-startup-") as directory:
     tmp = Path(directory)
-    for name in ("controller.cpp", "controller.h", "audio.cpp", "audio.h", "config.h", "system_shortcuts.h", "volume_overlay.h", "ping.h", "brightness.h", "brightness.cpp", "display_settings.h", "display_settings.cpp"):
+    for name in ("controller.cpp", "controller.h", "audio.cpp", "audio.h", "config.h", "system_shortcuts.h", "volume_overlay.h", "ping.h", "brightness.h", "brightness.cpp", "display_settings.h", "display_settings.cpp", "settings_persistence.h", "settings_persistence.cpp"):
         (tmp / name).write_text((SOURCE / name).read_text())
     host = (ROOT / "tests/system_shortcuts/host.h").read_text()
     host = host.replace("inline void vTaskDelay(int) {}", "void vTaskDelay(int);")
@@ -36,6 +36,6 @@ with tempfile.TemporaryDirectory(prefix="lilka-startup-") as directory:
     for sanitize in (False, True):
         flags = ["-fsanitize=address,undefined", "-fno-pie", "-no-pie"] if sanitize else []
         command = [os.environ.get("CXX", "g++"), "-std=c++11", "-DLILKA_VERSION=2", "-Wall", "-Wextra", "-Wno-reorder", "-Wno-unused-parameter", *flags,
-                   "-I" + str(tmp), "-I" + str(TEST), "-I" + str(U8G2.parent), str(tmp / "controller.cpp"), str(tmp / "audio.cpp"), str(tmp / "brightness.cpp"), str(tmp / "display_settings.cpp"), str(tmp / "board_stub.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
+                   "-I" + str(tmp), "-I" + str(TEST), "-I" + str(U8G2.parent), str(tmp / "controller.cpp"), str(tmp / "audio.cpp"), str(tmp / "brightness.cpp"), str(tmp / "display_settings.cpp"), str(tmp / "settings_persistence.cpp"), str(tmp / "board_stub.cpp"), str(TEST / "regression.cpp"), "-o", str(tmp / "regression")]
         subprocess.run(command, check=True)
         subprocess.run([str(tmp / "regression")], check=True)
