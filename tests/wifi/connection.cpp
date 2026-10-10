@@ -1,4 +1,7 @@
+#include <Arduino.h>
+#define private public
 #include <lilka/wifi_connection.h>
+#undef private
 #include <Preferences.h>
 #include <WiFi.h>
 #include <cassert>
@@ -35,6 +38,7 @@ int main() {
     WiFi.statusValue = WL_CONNECTED;
     assert(selector.poll(20040) == State::Connected);
     assert(selector.ssid() == emoji && WiFi.scans == 1);
+    assert(selector.known.capacity() == 0 && selector.preferred.isEmpty());
     for (unsigned i = 0; i < 100; ++i)
         assert(selector.poll(30000 + i) == State::Connected);
     assert(WiFi.attempts.size() == 3 && Preferences::writes == writes);
@@ -102,6 +106,7 @@ int main() {
     assert(selector.start(0) == State::Connecting);
     const unsigned scansBeforeOnly = WiFi.scans;
     assert(selector.poll(10000) == State::Failed);
+    assert(selector.known.capacity() == 0);
     assert(WiFi.scans == scansBeforeOnly); // Only saved AP already tried.
     selector.cancel(true);
     Preferences::data.clear();

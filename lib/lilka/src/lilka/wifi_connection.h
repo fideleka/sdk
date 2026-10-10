@@ -48,6 +48,8 @@ private:
     bool ownsAssociation = false;
     bool ownsScan = false;
 
+    void releaseCandidates();
+    State fail();
     bool preserveConnected();
     void attempt(size_t index, uint32_t now);
     State scan(uint32_t now);
