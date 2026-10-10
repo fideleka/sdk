@@ -12,7 +12,8 @@ service/producer task. Non-networked firmware remains unchanged.
 3. After up to 10 seconds without IP, recheck success before stopping that
    association. Scan only if an untried saved candidate remains. Discovery uses
    a temporary 3072-byte-stack worker using Arduino's completion-owned scan
-   (100..120 ms/channel). IDF 4.4 posts SCAN_DONE even for blocking scans;
+   (100..120 ms/channel for automatic recovery; explicit Keira discovery uses
+   the original Arduino 300 ms/channel maximum). IDF 4.4 posts SCAN_DONE even for blocking scans;
    directly retrieving its list races Arduino's handler. The owner remains
    cooperative, with a 5-second polling deadline. No SSID/password is logged. Association attempts use RAM driver storage,
    even if Arduino previously initialized the adapter with its Flash default.
