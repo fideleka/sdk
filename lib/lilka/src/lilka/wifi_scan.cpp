@@ -14,6 +14,7 @@ std::atomic<bool> discarded{false};
 portMUX_TYPE scanMux = portMUX_INITIALIZER_UNLOCKED;
 wifi_ap_record_t* result = nullptr;
 int resultCount = -2;
+unsigned scanDwellMs = 120;
 
 void collect(void*) {
     // IDF 4.4 still posts SCAN_DONE for a blocking scan. Arduino's handler
@@ -21,7 +22,7 @@ void collect(void*) {
     // Borrow its contiguous records instead of retrieving/copying them again.
     resultCount = -2;
     if (!discarded.load()) {
-        const int count = WiFi.scanNetworks(false, false, false, 120);
+        const int count = WiFi.scanNetworks(false, false, false, scanDwellMs);
         if (count >= 0 && !discarded.load()) {
             resultCount = std::min(count, int(BoundedWiFiScan::Capacity));
             result = static_cast<wifi_ap_record_t*>(WiFi.getScanInfoByIndex(0));
@@ -47,8 +48,17 @@ void collect(void*) {
 } // namespace
 
 bool BoundedWiFiScan::start() {
+    return startWithDwell(120);
+}
+
+bool BoundedWiFiScan::startDiscovery() {
+    return startWithDwell(300);
+}
+
+bool BoundedWiFiScan::startWithDwell(unsigned dwellMs) {
     if (stage.load() == Stage::Running || WiFi.scanComplete() == WIFI_SCAN_RUNNING) return false;
     release();
+    scanDwellMs = dwellMs; // Serialized owner; immutable until the worker drains.
     discarded.store(false);
     stage.store(Stage::Running);
     if (xTaskCreate(collect, "wifiScan", 3072, nullptr, 1, nullptr) != pdPASS) {
