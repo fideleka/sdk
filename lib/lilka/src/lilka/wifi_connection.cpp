@@ -48,6 +48,7 @@ void WiFiConnection::attempt(size_t index, uint32_t now) {
 }
 
 WiFiConnection::State WiFiConnection::start(uint32_t now) {
+    roundStarted = now;
     stopScan();
     selectedSSID = selectedPassword = "";
     ownsAssociation = false;
@@ -133,6 +134,15 @@ WiFiConnection::State WiFiConnection::poll(uint32_t now) {
     }
     if (preserveConnected()) return current;
     if (current == State::Connected) {
+        return current = State::Failed;
+    }
+    if (uint32_t(now - roundStarted) >= RoundTimeoutMs) {
+        // One bound for the entire round, regardless of saved-network count.
+        if (preserveConnected()) return current;
+        stopScan();
+        if (ownsAssociation) WiFi.disconnect();
+        ownsAssociation = false;
+        selectedPassword = "";
         return current = State::Failed;
     }
     if (current == State::Connecting) {
