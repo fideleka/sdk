@@ -31,7 +31,7 @@ with tempfile.TemporaryDirectory(prefix="sdk-wifi-test-") as directory:
                         "-I" + str(tests),
                         "-I" + str(root / "lib/lilka/src"),
                         str(sources / "wifi_credentials.cpp"),
-                        *([str(sources / "wifi_connection.cpp")] if name == "connection" else []),
+                        *([str(sources / "wifi_connection.cpp"), str(tests / "scan_stub.cpp")] if name == "connection" else []),
                         str(tests / (name + ".cpp")),
                         "-o",
                         str(output),

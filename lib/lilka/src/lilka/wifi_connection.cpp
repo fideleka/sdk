@@ -1,4 +1,5 @@
 #include "wifi_connection.h"
+#include "wifi_scan.h"
 #include <Preferences.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -73,7 +74,7 @@ WiFiConnection::State WiFiConnection::start(uint32_t now) {
     if (known.empty()) {
         return current = State::NoCredentials;
     }
-    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
+    if (detail::BoundedWiFiScan::running() || WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
         return fail();
     }
     WiFi.persistent(false);
@@ -100,7 +101,7 @@ WiFiConnection::State WiFiConnection::scan(uint32_t now) {
     }
     scanned = true;
     // Don't consume or delete a scan started by an application UI.
-    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
+    if (detail::BoundedWiFiScan::running() || WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
         return fail();
     }
     WiFi.setAutoReconnect(false);
@@ -108,14 +109,16 @@ WiFiConnection::State WiFiConnection::scan(uint32_t now) {
     ownsScan = true;
     started = now;
     current = State::Scanning;
-    const int result = WiFi.scanNetworks(true);
-    return result == WIFI_SCAN_RUNNING ? current : poll(now);
+    if (!detail::BoundedWiFiScan::start()) {
+        ownsScan = false;
+        return fail();
+    }
+    return detail::BoundedWiFiScan::running() ? current : poll(now);
 }
 
 void WiFiConnection::stopScan() {
     if (ownsScan) {
-        esp_wifi_scan_stop();
-        WiFi.scanDelete();
+        detail::BoundedWiFiScan::release();
         ownsScan = false;
     }
 }
@@ -165,17 +168,18 @@ WiFiConnection::State WiFiConnection::poll(uint32_t now) {
         ownsAssociation = false;
         return scanned ? next(now) : scan(now);
     }
-    const int count = WiFi.scanComplete();
+    const int count = detail::BoundedWiFiScan::count();
     if (count == WIFI_SCAN_RUNNING && uint32_t(now - started) < ScanTimeoutMs) {
         return current;
     }
     if (count >= 0) {
-        // Bound allocation/CPU work and match exact SSID bytes; unknown APs are ignored.
+        // Retrieval was capped before allocating the adapter copy; ignore unknown APs.
+        const wifi_ap_record_t* records = detail::BoundedWiFiScan::records();
         for (int i = 0; i < std::min(count, 64); ++i) {
-            const String name = WiFi.SSID(i);
+            const String name(reinterpret_cast<const char*>(records[i].ssid));
             for (Credential& entry : known) {
                 if (entry.ssid == name) {
-                    entry.rssi = std::max(entry.rssi, WiFi.RSSI(i));
+                    entry.rssi = std::max(entry.rssi, int32_t(records[i].rssi));
                 }
             }
         }
