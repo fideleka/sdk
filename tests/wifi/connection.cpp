@@ -97,6 +97,12 @@ int main() {
     WiFi.connectAfterStatus = true;
     assert(selector.poll(10000) == State::Connected);
     assert(WiFi.disconnects == disconnects && WiFi.scans == scans);
+    selector.cancel(true);
+    assert(selector.load(prefs));
+    assert(selector.start(0) == State::Connecting);
+    const unsigned scansBeforeOnly = WiFi.scans;
+    assert(selector.poll(10000) == State::Failed);
+    assert(WiFi.scans == scansBeforeOnly); // Only saved AP already tried.
     puts(
         "Shared SDK WiFi: preferred, ranked/deduped fallback, open/UTF-8, cancellation, rollover, deadlines, no writes "
         "PASS"
