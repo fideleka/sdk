@@ -79,6 +79,21 @@ int main() {
     assert(NetworkCredentials::save(prefs, emoji, "password123"));
     assert(Preferences::data["wifi0"] == std::vector<uint8_t>({1, 2, 3}));
     assert(NetworkCredentials::list(prefs).size() == 1);
+    auto snapshot = NetworkCredentials::snapshot(prefs);
+    assert(snapshot.size() == 1 && snapshot[0].ssid == emoji && snapshot[0].password == "password123");
+    reset();
+    assert(NetworkCredentials::save(prefs, "Aa", "indexed"));
+    prefs.putString("last_ssid", "BB");
+    assert(NetworkCredentials::snapshot(prefs).size() == 1); // Hash collision is not a known SSID.
+    assert(NetworkCredentials::forget(prefs, "Aa"));
+    prefs.putString("last_ssid", "Aa");
+    prefs.putString(NetworkCredentials::passwordKey("Aa").c_str(), "stale");
+    assert(NetworkCredentials::snapshot(prefs).empty()); // Tombstone blocks resurrection.
+    reset();
+    prefs.putString("last_ssid", "Legacy open");
+    prefs.putString(NetworkCredentials::passwordKey("Legacy open").c_str(), "");
+    snapshot = NetworkCredentials::snapshot(prefs);
+    assert(snapshot.size() == 1 && snapshot[0].password.isEmpty());
     puts(
         "Production WiFi credentials: UTF-8 emoji/open/legacy/collisions/forget/failure/capacity/no redundant writes "
         "PASS"
