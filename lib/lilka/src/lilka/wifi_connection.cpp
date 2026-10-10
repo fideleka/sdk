@@ -152,7 +152,7 @@ WiFiConnection::State WiFiConnection::poll(uint32_t now) {
 
 void WiFiConnection::cancel(bool disconnect) {
     stopScan();
-    if (ownsAssociation || disconnect) {
+    if (disconnect || (ownsAssociation && WiFi.status() != WL_CONNECTED)) {
         WiFi.setAutoReconnect(false);
         WiFi.disconnect();
     }
