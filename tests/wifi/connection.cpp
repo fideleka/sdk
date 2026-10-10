@@ -82,6 +82,13 @@ int main() {
     assert(!selector.load(prefs));
     WiFi.scanValue = WIFI_SCAN_FAILED;
     assert(selector.start(0) == State::NoCredentials);
+    // IP can arrive between owner polls: cancelling must still preserve it.
+    assert(NetworkCredentials::save(prefs, "Just connected", "password"));
+    assert(selector.load(prefs));
+    assert(selector.start(0) == State::Connecting);
+    WiFi.statusValue = WL_CONNECTED;
+    selector.cancel(false);
+    assert(WiFi.statusValue == WL_CONNECTED && selector.state() == State::Idle);
     puts(
         "Shared SDK WiFi: preferred, ranked/deduped fallback, open/UTF-8, cancellation, rollover, deadlines, no writes "
         "PASS"
