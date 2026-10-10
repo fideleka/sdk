@@ -46,6 +46,7 @@ private:
     bool ownsAssociation = false;
     bool ownsScan = false;
 
+    bool preserveConnected();
     void attempt(size_t index, uint32_t now);
     State scan(uint32_t now);
     State next(uint32_t now);

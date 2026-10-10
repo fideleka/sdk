@@ -21,7 +21,19 @@ bool WiFiConnection::load(Preferences& prefs) {
     return !known.empty();
 }
 
+bool WiFiConnection::preserveConnected() {
+    if (WiFi.status() != WL_CONNECTED) return false;
+    stopScan();
+    if (ownsAssociation && WiFi.SSID() != selectedSSID) {
+        selectedSSID = selectedPassword = "";
+    }
+    ownsAssociation = false;
+    current = State::Connected;
+    return true;
+}
+
 void WiFiConnection::attempt(size_t index, uint32_t now) {
+    if (preserveConnected()) return;
     Credential& entry = known[index];
     entry.tried = true;
     selectedSSID = entry.ssid;
@@ -69,6 +81,7 @@ WiFiConnection::State WiFiConnection::start(uint32_t now) {
 }
 
 WiFiConnection::State WiFiConnection::scan(uint32_t now) {
+    if (preserveConnected()) return current;
     scanned = true;
     // Don't consume or delete a scan started by an application UI.
     if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
@@ -93,6 +106,7 @@ void WiFiConnection::stopScan() {
 }
 
 WiFiConnection::State WiFiConnection::next(uint32_t now) {
+    if (preserveConnected()) return current;
     size_t strongest = known.size();
     for (size_t i = 0; i < known.size(); ++i) {
         const Credential& entry = known[i];
@@ -112,14 +126,7 @@ WiFiConnection::State WiFiConnection::poll(uint32_t now) {
     if (current == State::Idle || current == State::Failed || current == State::NoCredentials) {
         return current;
     }
-    if (WiFi.status() == WL_CONNECTED) {
-        stopScan();
-        if (ownsAssociation && WiFi.SSID() != selectedSSID) {
-            selectedSSID = selectedPassword = "";
-        }
-        ownsAssociation = false;
-        return current = State::Connected;
-    }
+    if (preserveConnected()) return current;
     if (current == State::Connected) {
         return current = State::Failed;
     }
@@ -127,6 +134,9 @@ WiFiConnection::State WiFiConnection::poll(uint32_t now) {
         if (uint32_t(now - started) < ConnectTimeoutMs) {
             return current;
         }
+        // Recheck at the destructive boundary: IP may arrive after the poll's
+        // first status observation. Driver events remain asynchronous.
+        if (preserveConnected()) return current;
         WiFi.disconnect();
         ownsAssociation = false;
         return scanned ? next(now) : scan(now);

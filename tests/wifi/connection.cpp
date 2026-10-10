@@ -89,6 +89,14 @@ int main() {
     WiFi.statusValue = WL_CONNECTED;
     selector.cancel(false);
     assert(WiFi.statusValue == WL_CONNECTED && selector.state() == State::Idle);
+    // IP arriving after the first timeout observation wins teardown.
+    selector.cancel(true);
+    assert(selector.load(prefs));
+    assert(selector.start(0) == State::Connecting);
+    const unsigned disconnects = WiFi.disconnects, scans = WiFi.scans;
+    WiFi.connectAfterStatus = true;
+    assert(selector.poll(10000) == State::Connected);
+    assert(WiFi.disconnects == disconnects && WiFi.scans == scans);
     puts(
         "Shared SDK WiFi: preferred, ranked/deduped fallback, open/UTF-8, cancellation, rollover, deadlines, no writes "
         "PASS"
