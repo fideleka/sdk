@@ -5,9 +5,10 @@
 namespace lilka {
 namespace detail {
 
-// Serialized owner API. Blocking IDF scans do not dispatch SCAN_DONE to Arduino,
-// avoiding its uncapped allocation. A temporary worker keeps the caller responsive.
-// Cancel discards the result; the short driver scan drains before another starts.
+// Serialized owner API. Arduino owns SCAN_DONE and the result allocation; the
+// adapter exposes at most Capacity records without another copy. Total driver/
+// Arduino allocation is NOT capped. A temporary worker keeps callers responsive.
+// Cancel discards the result; the short scan drains before another starts.
 class BoundedWiFiScan {
 public:
     static constexpr unsigned Capacity = 64;

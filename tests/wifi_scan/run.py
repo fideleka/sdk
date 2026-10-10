@@ -1,9 +1,11 @@
-"""Exercise the real bounded scan worker and cancellation lifecycle, no firmware build."""
+"""Real scan adapter: Arduino completion ownership, borrowed results and drain."""
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
+
 root = Path(__file__).resolve().parents[2]
-source = root / 'lib/lilka/src/lilka'
+source = Path(sys.argv[1]) if len(sys.argv) > 1 else root / 'lib/lilka/src/lilka'
 mock = r'''
 #pragma once
 #include <cassert>
@@ -16,8 +18,9 @@ inline void portEXIT_CRITICAL(int*) {}
 constexpr int pdPASS = 1, ESP_OK = 0, WIFI_SCAN_RUNNING = -1, WIFI_SCAN_TYPE_ACTIVE = 0;
 extern void (*worker)(void*);
 extern void (*scanHook)();
+extern void (*deleteHook)();
 extern bool taskFail, driverFail, retrieveFail;
-extern int scans, retrievals, clears;
+extern int scans, retrievals, clears, discovered;
 struct wifi_ap_record_t { uint8_t ssid[33]; int8_t rssi; };
 struct wifi_scan_config_t { int scan_type; struct { struct { unsigned min, max; } active; } scan_time; };
 inline int xTaskCreate(void(*fn)(void*), const char*, unsigned stack, void*, int, void*) {
@@ -27,33 +30,57 @@ inline int xTaskCreate(void(*fn)(void*), const char*, unsigned stack, void*, int
     return pdPASS;
 }
 inline void vTaskDelete(void*) {}
-inline int esp_wifi_scan_start(const wifi_scan_config_t* c, bool block) {
-    assert(block && c->scan_time.active.max == 120);
-    ++scans;
-    if (scanHook) scanHook();
+struct WiFiHAL {
+    int external = -2, count = 0;
+    wifi_ap_record_t* results = nullptr;
+    int scanComplete() { return external; }
+    int scanNetworks(bool async, bool hidden, bool passive, uint32_t dwell) {
+        assert(!async && !hidden && !passive && dwell == 120);
+        ++scans;
+        if (scanHook) scanHook();
+        if (driverFail) return -2;
+        // Model Arduino SCAN_DONE consuming the entire IDF list before the
+        // blocking call returns, including scans initiated directly via IDF.
+        count = retrieveFail ? 0 : discovered;
+        if (count) {
+            results = new wifi_ap_record_t[count]{};
+            for (int i = 0; i < count; ++i) {
+                std::strcpy(reinterpret_cast<char*>(results[i].ssid), "AP");
+                results[i].rssi = -40;
+            }
+        }
+        return count;
+    }
+    void* getScanInfoByIndex(int i) { return results && i < count ? results + i : nullptr; }
+    void scanDelete() {
+        if (deleteHook) deleteHook();
+        delete[] results;
+        results = nullptr;
+        count = 0;
+        ++clears;
+    }
+};
+extern WiFiHAL WiFi;
+inline int esp_wifi_scan_start(const wifi_scan_config_t*, bool block) {
+    assert(block);
+    WiFi.scanNetworks(false, false, false, 120);
     return driverFail ? -1 : ESP_OK;
 }
-inline int esp_wifi_scan_get_ap_records(uint16_t* count, wifi_ap_record_t* records) {
+inline int esp_wifi_scan_get_ap_records(uint16_t* count, wifi_ap_record_t*) {
     ++retrievals;
-    assert(*count == 64); // A dense 200-AP scan still retrieves only 64.
-    if (retrieveFail) return -1;
-    for (unsigned i = 0; i < *count; ++i) {
-        std::strcpy(reinterpret_cast<char*>(records[i].ssid), "AP");
-        records[i].rssi = -40;
-    }
-    return ESP_OK;
+    *count = 0; // Arduino has already consumed the driver list.
+    return retrieveFail ? -1 : ESP_OK;
 }
 inline int esp_wifi_clear_ap_list() { ++clears; return ESP_OK; }
-struct WiFiHAL { int external = -2; int scanComplete() { return external; } };
-extern WiFiHAL WiFi;
 '''
 test = r'''
 #include "mock.h"
 #include "wifi_scan.h"
 void (*worker)(void*) = nullptr;
 void (*scanHook)() = nullptr;
+void (*deleteHook)() = nullptr;
 bool taskFail = false, driverFail = false, retrieveFail = false;
-int scans = 0, retrievals = 0, clears = 0;
+int scans = 0, retrievals = 0, clears = 0, discovered = 200;
 WiFiHAL WiFi;
 using Scan = lilka::detail::BoundedWiFiScan;
 void finish() { auto fn = worker; worker = nullptr; assert(fn); fn(nullptr); }
@@ -67,31 +94,47 @@ int main() {
     assert(Scan::start() && Scan::running() && !Scan::start());
     finish();
     assert(Scan::count() == 64 && Scan::records()[63].rssi == -40);
+    assert(Scan::records() == WiFi.results && retrievals == 0);
     Scan::release();
-    assert(!Scan::records() && Scan::count() == -2);
+    assert(!Scan::records() && Scan::count() == -2 && !WiFi.results);
+    discovered = 3;
     assert(Scan::start());
-    Scan::release(); // Cancellation before worker begins: no driver scan at all.
+    finish();
+    assert(Scan::count() == 3 && Scan::records()[2].rssi == -40);
+    Scan::release();
+    assert(Scan::start());
+    Scan::release(); // Cancellation before worker begins: no scan.
     assert(Scan::running() && !Scan::start());
     const int before = scans;
+    deleteHook = [] { assert(Scan::running() && !Scan::start()); };
     finish();
+    deleteHook = nullptr;
     assert(scans == before && !Scan::running() && !Scan::records());
     assert(Scan::start());
-    scanHook = [] { Scan::release(); }; // Cancel while the blocking driver scan drains.
+    scanHook = [] { Scan::release(); }; // Cancel while completion drains.
+    deleteHook = [] { assert(Scan::running() && !Scan::start()); };
     finish();
     scanHook = nullptr;
-    assert(!Scan::running() && !Scan::records() && Scan::count() == -2);
-    for (int scenario = 0; scenario < 2; ++scenario) {
-        driverFail = scenario == 0;
-        retrieveFail = scenario == 1;
+    deleteHook = nullptr;
+    assert(!Scan::running() && !Scan::records() && Scan::count() == -2 && !WiFi.results);
+    driverFail = true;
+    assert(Scan::start());
+    finish();
+    assert(Scan::count() == -2);
+    Scan::release();
+    driverFail = false;
+    for (int empty = 0; empty < 2; ++empty) {
+        retrieveFail = empty == 0;
+        discovered = 0;
         assert(Scan::start());
         finish();
-        assert(Scan::count() == -2);
+        assert(Scan::count() == 0 && !Scan::records());
         Scan::release();
     }
-    assert(clears == 5); // Driver list cleanup on success, cancellation and errors.
+    assert(!WiFi.results && retrievals == 0);
 }
 '''
-with tempfile.TemporaryDirectory(prefix='bounded-wifi-scan-') as directory:
+with tempfile.TemporaryDirectory(prefix='wifi-scan-completion-') as directory:
     tmp = Path(directory)
     (tmp / 'mock.h').write_text(mock)
     for name in ('wifi_scan.cpp', 'wifi_scan.h'):
@@ -107,4 +150,4 @@ with tempfile.TemporaryDirectory(prefix='bounded-wifi-scan-') as directory:
                         '-I' + str(tmp), str(tmp / 'wifi_scan.cpp'), str(tmp / 'test.cpp'),
                         '-o', str(tmp / 'test')], check=True)
         subprocess.run([str(tmp / 'test')], check=True)
-print('Bounded IDF scan: dense results, cancellation drain/free, external ownership, task/driver/retrieval failures PASS')
+print('Scan completion ownership, 200/3/0 APs, borrowed results, cancellation drain, external ownership and failures PASS')
