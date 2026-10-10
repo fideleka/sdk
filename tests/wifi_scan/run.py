@@ -20,7 +20,7 @@ extern void (*worker)(void*);
 extern void (*scanHook)();
 extern void (*deleteHook)();
 extern bool taskFail, driverFail, retrieveFail;
-extern int scans, retrievals, clears, discovered;
+extern int scans, retrievals, clears, discovered, lastDwell;
 struct wifi_ap_record_t { uint8_t ssid[33]; int8_t rssi; };
 struct wifi_scan_config_t { int scan_type; struct { struct { unsigned min, max; } active; } scan_time; };
 inline int xTaskCreate(void(*fn)(void*), const char*, unsigned stack, void*, int, void*) {
@@ -35,7 +35,8 @@ struct WiFiHAL {
     wifi_ap_record_t* results = nullptr;
     int scanComplete() { return external; }
     int scanNetworks(bool async, bool hidden, bool passive, uint32_t dwell) {
-        assert(!async && !hidden && !passive && dwell == 120);
+        assert(!async && !hidden && !passive && (dwell == 120 || dwell == 300));
+        lastDwell = dwell;
         ++scans;
         if (scanHook) scanHook();
         if (driverFail) return -2;
@@ -80,7 +81,7 @@ void (*worker)(void*) = nullptr;
 void (*scanHook)() = nullptr;
 void (*deleteHook)() = nullptr;
 bool taskFail = false, driverFail = false, retrieveFail = false;
-int scans = 0, retrievals = 0, clears = 0, discovered = 200;
+int scans = 0, retrievals = 0, clears = 0, discovered = 200, lastDwell = 0;
 WiFiHAL WiFi;
 using Scan = lilka::detail::BoundedWiFiScan;
 void finish() { auto fn = worker; worker = nullptr; assert(fn); fn(nullptr); }
@@ -94,13 +95,13 @@ int main() {
     assert(Scan::start() && Scan::running() && !Scan::start());
     finish();
     assert(Scan::count() == 64 && Scan::records()[63].rssi == -40);
-    assert(Scan::records() == WiFi.results && retrievals == 0);
+    assert(Scan::records() == WiFi.results && retrievals == 0 && lastDwell == 120);
     Scan::release();
     assert(!Scan::records() && Scan::count() == -2 && !WiFi.results);
     discovered = 3;
-    assert(Scan::start());
+    assert(Scan::startDiscovery());
     finish();
-    assert(Scan::count() == 3 && Scan::records()[2].rssi == -40);
+    assert(Scan::count() == 3 && Scan::records()[2].rssi == -40 && lastDwell == 300);
     Scan::release();
     assert(Scan::start());
     Scan::release(); // Cancellation before worker begins: no scan.
