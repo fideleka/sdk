@@ -57,7 +57,7 @@ int main(int argc,char** argv){
  displaySettings.servicePersistence();assert(writes==2&&stored==0);
  displaySettings.setTimeoutSeconds(60);displaySettings.servicePersistence();assert(writes==2);
  now+=601;failSave=true;displaySettings.servicePersistence();assert(stored==0);
- failSave=false;displaySettings.servicePersistence();assert(stored==60);
+ failSave=false;now+=1000;displaySettings.servicePersistence();assert(stored==60);
  displaySettings.setTimeoutSeconds(120);now+=601;
  writeHook=[](){lilka::displaySettings.setTimeoutSeconds(300);};displaySettings.servicePersistence();assert(stored==120);
  now+=601;displaySettings.servicePersistence();assert(stored==300);
@@ -91,16 +91,16 @@ int main(int argc,char** argv){
 '''
 with tempfile.TemporaryDirectory(prefix='lilka-display-settings-') as directory:
     tmp=Path(directory)
-    for name in ('display_settings.cpp','display_settings.h'):
+    for name in ('display_settings.cpp','display_settings.h','settings_persistence.h','settings_persistence.cpp'):
         (tmp/name).write_text((SOURCE/name).read_text())
     (tmp/'mock.h').write_text(mock)
     (tmp/'test.cpp').write_text(test)
-    for name in ('Arduino.h','Preferences.h','freertos/FreeRTOS.h','freertos/task.h','board.h','brightness.h'):
+    for name in ('Arduino.h','Preferences.h','freertos/FreeRTOS.h','freertos/task.h','freertos/semphr.h','board.h','brightness.h'):
         p=tmp/name;p.parent.mkdir(parents=True,exist_ok=True);p.write_text('#pragma once\n#include "mock.h"\n')
     for sanitize in (False,True):
         flags=['-fsanitize=address,undefined','-fno-pie','-no-pie'] if sanitize else []
         subprocess.run([os.environ.get('CXX','g++'),'-std=c++11','-Wall','-Wextra','-Werror',*flags,
-                        '-I'+str(tmp),str(tmp/'display_settings.cpp'),str(tmp/'test.cpp'),'-o',str(tmp/'test')],check=True)
+                        '-I'+str(tmp),str(tmp/'display_settings.cpp'),str(tmp/'settings_persistence.cpp'),str(tmp/'test.cpp'),'-o',str(tmp/'test')],check=True)
         for scenario in ('0','3','5'):
             subprocess.run([str(tmp/'test'),scenario],check=True)
 print('Shared timeout, safe wake, active-work inhibition, persistence/retry/concurrency and rollover PASS')

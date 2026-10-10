@@ -7,7 +7,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'lib/lilka/src/lilka'
-U8G2 = ROOT / 'lib/lilka/.pio/libdeps/v2/U8g2/src'
+U8G2 = Path(os.environ.get('U8G2_SOURCE', ROOT.parent / 'lilka-sdk/lib/lilka/.pio/libdeps/v2/U8g2/src'))
 MOCK = r'''
 #pragma once
 #include <cassert>
@@ -15,7 +15,10 @@ MOCK = r'''
 #include <cstring>
 #include <climits>
 using SemaphoreHandle_t=void*; using TaskHandle_t=void*; using BaseType_t=int;
-using portMUX_TYPE=int;
+using portMUX_TYPE=int; using TickType_t=uint32_t;
+constexpr int pdTRUE=1;
+inline uint32_t ulTaskNotifyTake(int, TickType_t){return 0;}
+inline void xTaskNotifyGive(TaskHandle_t){}
 #define portMUX_INITIALIZER_UNLOCKED 0
 #define pdMS_TO_TICKS(x) (x)
 constexpr int portMAX_DELAY=-1,pdPASS=1,ESP_OK=0;
@@ -81,7 +84,7 @@ int main(int argc,char** argv){
  brightness.servicePersistence();assert(writes==0);
  now+=601;brightness.servicePersistence();assert(writes==1&&stored==30);
  brightness.setBrightness(40);now+=601;failSave=true;brightness.servicePersistence();assert(stored==30);
- failSave=false;brightness.servicePersistence();assert(stored==40);
+ failSave=false;now+=1000;brightness.servicePersistence();assert(stored==40);
  brightness.setBrightness(50);now+=601;writeHook=[](){lilka::brightness.setBrightness(70);};brightness.servicePersistence();assert(stored==50);
  now+=601;brightness.servicePersistence();assert(stored==70);
  brightness.setBrightness(0);now+=601;brightness.servicePersistence();assert(stored==5&&brightness.getBrightness()==5&&duty==13);
@@ -112,18 +115,18 @@ int main(int argc,char** argv){
 '''
 with tempfile.TemporaryDirectory(prefix='lilka-backlight-') as directory:
     tmp = Path(directory)
-    for name in ('brightness.cpp','brightness.h','config.h','volume_overlay.h','system_shortcuts.h','display_settings.h'):
+    for name in ('brightness.cpp','brightness.h','config.h','volume_overlay.h','system_shortcuts.h','display_settings.h','settings_persistence.h','settings_persistence.cpp'):
         (tmp/name).write_text((SOURCE/name).read_text())
     (tmp/'mock.h').write_text(MOCK)
     (tmp/'regression.cpp').write_text(TEST)
-    for name in ('Arduino.h','Preferences.h','driver/ledc.h','driver/gpio.h','freertos/semphr.h','freertos/FreeRTOS.h'):
+    for name in ('Arduino.h','Preferences.h','driver/ledc.h','driver/gpio.h','freertos/semphr.h','freertos/FreeRTOS.h','freertos/task.h'):
         path=tmp/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#pragma once\n#include "mock.h"\n')
     for version,enabled in ((2,1),(2,0),(1,1)):
         for sanitize in (False,True):
             flags=['-fsanitize=address,undefined','-fno-pie','-no-pie'] if sanitize else []
             command=[os.environ.get('CXX','g++'),'-std=c++11','-Wall','-Wextra','-Werror',*flags,
                      '-DLILKA_VERSION='+str(version),'-DLILKA_INDEPENDENT_BACKLIGHT='+str(enabled),
-                     '-I'+str(tmp),'-I'+str(U8G2),str(tmp/'brightness.cpp'),str(tmp/'regression.cpp'),'-o',str(tmp/'regression')]
+                     '-I'+str(tmp),'-I'+str(U8G2),str(tmp/'brightness.cpp'),str(tmp/'settings_persistence.cpp'),str(tmp/'regression.cpp'),'-o',str(tmp/'regression')]
             subprocess.run(command,check=True)
             scenarios=('0','1','2','3','5') if version==2 and enabled else ('0',)
             for scenario in scenarios: subprocess.run([str(tmp/'regression'),scenario],check=True)

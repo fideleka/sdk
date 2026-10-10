@@ -35,7 +35,7 @@ public:
     static bool isDimmed();
 
 private:
-    static void servicePersistence();
+    static uint32_t servicePersistence();
 };
 
 extern Brightness brightness;

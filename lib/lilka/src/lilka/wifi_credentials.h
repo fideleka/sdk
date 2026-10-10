@@ -10,6 +10,12 @@ namespace lilka {
 class NetworkCredentials {
 public:
     static constexpr unsigned Capacity = 16;
+    struct SavedNetwork {
+        String ssid;
+        String password;
+    };
+    /// Single-pass bounded credential snapshot; selected legacy fallback only.
+    static std::vector<SavedNetwork> snapshot(Preferences& prefs);
     static bool read(Preferences& prefs, const String& ssid, String& password);
     static bool save(Preferences& prefs, const String& ssid, const String& password, bool preferred = true);
     static bool forget(Preferences& prefs, const String& ssid);

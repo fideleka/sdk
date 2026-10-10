@@ -1,8 +1,7 @@
 # Shared saved-network Wi-Fi fallback
 
 Keira manages networks; Keira and Lilplayer use the same SDK credential storage
-and cooperative `lilka::wifiConnection` selector. No radio is activated and no
-new task is created by SDK startup. Consumers opt in explicitly on their owning
+and cooperative `lilka::wifiConnection` selector. No radio or scan worker is activated by SDK startup. Consumers opt in explicitly on their owning
 service/producer task. Non-networked firmware remains unchanged.
 
 ## Selection policy
@@ -10,23 +9,32 @@ service/producer task. Non-networked firmware remains unchanged.
 1. Keep any already working connection; do not roam to a stronger AP.
 2. Read the `network` namespace once for a connection round. Try `last_ssid`
    first if its saved credentials still exist, including an empty/open password.
-3. After up to 10 seconds without IP, stop that association and scan asynchronously.
-   Scanning has a 5-second polling deadline. No SSID/password is logged. Association attempts use RAM driver storage,
+3. After up to 10 seconds without IP, recheck success before stopping that
+   association. Scan only if an untried saved candidate remains. Discovery uses
+   a temporary 3072-byte-stack worker with a blocking IDF scan (120 ms/channel)
+   to avoid Arduino's SCAN_DONE all-results allocation. The owner remains
+   cooperative, with a 5-second polling deadline. No SSID/password is logged. Association attempts use RAM driver storage,
    even if Arduino previously initialized the adapter with its Flash default.
 4. Match exact SSID bytes against saved full-SSID records. Ignore unknown APs;
-   inspect at most 64 scan results, deduplicate repeated SSIDs and retain their
+   retrieve at most 64 AP records before allocating any adapter copy, deduplicate repeated SSIDs and retain their
    strongest RSSI. Try other visible saved networks strongest first. Each SSID
    is attempted once per round, with up to 10 seconds per association.
 5. Stop when one obtains IP or candidates are exhausted. Driver autoreconnect
    is disabled during selection so it cannot compete with the fallback order.
 
 At most 16 indexed networks plus a recoverable legacy selected network are loaded.
-Worst-case polling budget is 17 * 10 seconds + 5 seconds per round; real driver
-calls aren't preempted by these deadlines. BSSID/channel pinning and roaming
+The complete round has a 35-second polling budget, including scanning. Saved
+candidate buffers/capacity are released after success, failure or cancellation;
+only the selected credential remains for post-IP persistence. The 64-record scan
+buffer is at most 5120 bytes on the installed ESP32-S3 ABI, plus temporary task
+stack/TCB and the driver's own scan list (not capped by this retrieval bound).
+Real driver calls aren't preempted by polling deadlines. BSSID/channel pinning and roaming
 while connected are intentionally not added. A preferred hidden AP is tried
 without a scan; non-preferred hidden APs cannot be discovered for fallback.
 
-Keira polls once per second and retries a failed round after 30 seconds. An
+Keira polls once per second; failed rounds use 30/60/120/240/480/900-second
+cooldowns, capped at 15 minutes. Success and explicit connection requests reset
+the cooldown. An
 explicit Connect in the management UI tries that chosen network only; a cancelled
 or failed manual attempt does not silently choose another one. After successful
 manual connection, later loss can use automatic fallback. Disconnect disables
@@ -38,8 +46,12 @@ Disconnect was selected.
 
 Lilplayer polls on the existing network producer every 20 ms, honors stream
 generation cancellation and retains its existing stream retry/backoff policy.
-Socket/audio tasks are unchanged. Cancellation tears down only the selector's
-owned association/scan, not a separate working connection.
+Socket/audio tasks are unchanged. Cancellation stops the owned association but
+preserves a working connection. An in-flight short blocking scan drains and
+frees its discarded result; no new scan starts until it has drained. This avoids
+late Arduino completion-event allocations and use-after-free on cancellation.
+Keira's explicit management scan uses the same bounded collector; legacy script
+Arduino scans are unchanged and must not run concurrently with a selector scan.
 
 A successful fallback is remembered only after IP. Identical saved records,
 passwords and `last_ssid` cause no writes. SDK `remember()` validates that the
@@ -67,7 +79,9 @@ installed Wi-Fi adapter rather than adding an external dependency.
 ## Verification
 
 Run `python3 tests/wifi/run.py` for real SDK storage and selector sources under
-signed/unsigned-char and normal/ASan/UBSan modes. Keira's Wi-Fi host suite exercises
+signed/unsigned-char and normal/ASan/UBSan modes. Also run
+`python3 tests/wifi_scan/run.py` for the actual IDF-worker adapter's retrieval cap,
+cancel/free lifecycle and task/driver/retrieval failures. Keira's Wi-Fi host suite exercises
 the actual service, fallback, successful-IP save, cancellation and Forget races.
 Lilplayer's transport suite compiles these same SDK sources with the actual
 producer/Playback. HAL tests model scans and IP events; they do not establish
