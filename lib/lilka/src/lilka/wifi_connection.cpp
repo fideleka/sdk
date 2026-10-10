@@ -43,7 +43,7 @@ void WiFiConnection::attempt(size_t index, uint32_t now) {
     started = now;
     // The selector owns retry order; driver autoreconnect must not fight it.
     WiFi.setAutoReconnect(false);
-    WiFi.disconnect();
+    // Initial/candidate attempts start from an already disconnected state.
     WiFi.begin(selectedSSID.c_str(), selectedPassword.c_str());
 }
 
@@ -94,7 +94,6 @@ WiFiConnection::State WiFiConnection::scan(uint32_t now) {
         return current = State::Failed;
     }
     WiFi.setAutoReconnect(false);
-    WiFi.disconnect();
     ownsAssociation = false;
     ownsScan = true;
     started = now;
