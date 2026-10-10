@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "settings_persistence.h"
 #include "config.h"
 #include "ping.h"
 #include "Preferences.h"
@@ -35,8 +36,8 @@ bool writeStartupFrames(const int16_t* frames, size_t bytes) {
     const uint8_t* data = reinterpret_cast<const uint8_t*>(frames);
     while (bytes) {
         size_t written = 0;
-        if (esp_i2s::i2s_write(esp_i2s::I2S_NUM_0, data, bytes, &written, pdMS_TO_TICKS(100)) != ESP_OK ||
-            !written || written > bytes) {
+        if (esp_i2s::i2s_write(esp_i2s::I2S_NUM_0, data, bytes, &written, pdMS_TO_TICKS(100)) != ESP_OK || !written ||
+            written > bytes) {
             return false;
         }
         data += written;
@@ -109,17 +110,8 @@ void welcomePlay(void*) {
 
 void Audio::begin() {
     getVolume(); // One NVS read before input and audio tasks start.
-    static TaskHandle_t settingsTask = nullptr;
-    if (!settingsTask) {
-        xTaskCreate(
-            [](void*) {
-                while (1) {
-                    Audio::serviceVolumePersistence();
-                    vTaskDelay(pdMS_TO_TICKS(50));
-                }
-            },
-            "audioSettings", 2048, nullptr, 1, &settingsTask
-        );
+    if (!detail::SettingsPersistence::begin(0, &Audio::serviceVolumePersistence)) {
+        serial.err("Could not start settings persistence worker");
     }
     initPins();
 
@@ -211,6 +203,7 @@ void Audio::setVolume(int level) {
         volumeSaveFailed = false;
     }
     xSemaphoreGive(settingsMutex());
+    detail::SettingsPersistence::notify();
 }
 
 namespace {
@@ -218,6 +211,7 @@ void adjustLiveVolume(int delta, bool shortcut) {
     const uint32_t now = millis();
     // Bounded RAM-only critical section: value, timestamp and revision form one
     // snapshot. No mutex wait, allocation, callback or NVS operation here.
+    bool changed = false;
     portENTER_CRITICAL(&volumeMux);
     const int old = liveVolume.load();
     const int bounded = old < 0 ? 0 : (old > 100 ? 100 : old);
@@ -228,6 +222,7 @@ void adjustLiveVolume(int delta, bool shortcut) {
         liveVolume.store(next);
         volumeChangedAt = now;
         ++volumeRevision;
+        changed = true;
     }
     if (shortcut) {
         volumeOverlay.level = next;
@@ -235,6 +230,7 @@ void adjustLiveVolume(int delta, bool shortcut) {
         volumeOverlay.valid = true;
     }
     portEXIT_CRITICAL(&volumeMux);
+    if (changed) detail::SettingsPersistence::notify();
 }
 } // namespace
 
@@ -253,8 +249,8 @@ VolumeOverlaySnapshot Audio::getVolumeOverlay() {
     return snapshot;
 }
 
-void Audio::serviceVolumePersistence() {
-    // Runs on its own task; serializes with public setters, NOT controller scans.
+uint32_t Audio::serviceVolumePersistence() {
+    // Runs on the shared settings task; serializes with public setters, NOT controller scans.
     xSemaphoreTake(settingsMutex(), portMAX_DELAY);
     portENTER_CRITICAL(&volumeMux);
     const uint32_t revision = volumeRevision;
@@ -277,7 +273,16 @@ void Audio::serviceVolumePersistence() {
             volumeRetryAt = now + 1000;
         }
     }
+    uint32_t next = 0;
+    if (revision != savedVolumeRevision) {
+        const uint32_t elapsed = now - changedAt;
+        next = elapsed < 600 ? 600 - elapsed : 1;
+        if (volumeSaveFailed && static_cast<int32_t>(now - volumeRetryAt) < 0 && volumeRetryAt - now > next) {
+            next = volumeRetryAt - now;
+        }
+    }
     xSemaphoreGive(settingsMutex());
+    return next;
 }
 
 uint32_t Audio::getStartupSoundEnabled() {

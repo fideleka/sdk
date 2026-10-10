@@ -33,7 +33,7 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 ## Persistence and boot safety
 
 - Namespace `backlight`, uint32 key `level`, independent of audio settings.
-- Hardware updates occur immediately. A 3072-byte-stack settings worker coalesces saves after 600 ms without a changed value. No NVS calls while handling input or holding the hardware mutex; failed writes retry with a 1-second delay. Concurrent later changes remain dirty.
+- Hardware updates occur immediately. One shared 3072-byte-stack notification-driven settings worker coalesces saves after 600 ms without a changed value. No NVS calls while handling input or holding the hardware mutex; failed writes retry with a 1-second delay. Concurrent later changes remain dirty.
 - Missing settings default to 100; invalid high values clamp to 100.
 - **Minimum selected brightness is 5% in RAM and NVS.** Legacy saved 0..4 loads as 5 and is normalized by the deferred worker. Temporary idle dimming never changes the selected or saved brightness.
 - PWM is configured during board initialization, before the welcome screen and controller task, not attached by a later application.
@@ -52,7 +52,7 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 
 - Public NVS constants live in `display_settings.h`: namespace `backlight`, brightness key `level`, off-timeout key `timeoutSeconds`, dim-timeout key `dimSeconds`. Both applications use these exact SDK APIs and keys, not private copies.
 - Both timers default to **Never (0)** for missing/invalid settings; valid previously saved choices are retained. Menu presets: Never (0), 30 sec, 1/2/5/10 min. API values are clamped to 0..3600 seconds; invalid stored values fall back to Never.
-- `getTimeoutSeconds()` reads RAM; `setTimeoutSeconds()` updates RAM and a separate 3072-byte-stack worker saves after 600 ms quiet, retrying failures. No NVS work on input/render paths.
+- `getTimeoutSeconds()` reads RAM; `setTimeoutSeconds()` updates RAM and the same shared settings worker saves after 600 ms quiet, retrying failures. No NVS work on input/render paths.
 - Keira: Settings -> Display, brightness, Auto-off and Idle dim controls. Up/Down selects; Left/Right or D/A adjusts. The menu disables its usual horizontal paging so adjustment cannot also switch rows.
 - Lilplayer: Settings -> Display with the same three values and controls. English/Ukrainian labels are provided in both applications.
 - Keira allows automatic off/dim only on Launcher, not foreground applications. Lilplayer allows both optional timers in every transport/work state, including playback/loading/scanning/retries/prompts; audio and background work continue. Doom allows both timers only in startup WAD/sound/Display menus and restores brightness before engine startup; gameplay and its pause/menu remain active. This is LCD/backlight control, not MCU sleep.
@@ -84,3 +84,23 @@ Passed:
 - Whitespace checks.
 
 `make clang-format` and `make cppcheck` were attempted but tools are absent; these static gates remain unperformed. No tools/dependencies installed. No firmware build, link, packaging, upload or new device test has been performed. Do not treat this source-level result as hardware release certification.
+
+## Resource-audit persistence consolidation
+
+Volume, brightness and display settings register separate callbacks on one lazy
+3072-byte-stack worker rather than reserving 2048 + 3072 + 3072 bytes. With all
+three active this saves 5120 bytes of task-stack reservations, excluding TCB,
+mutex and registry overhead. Audio-only consumers now reserve 1024 bytes more
+than their former 2048-byte saver; the shared stack retains the largest former
+setting-worker size without assuming unmeasured stack headroom.
+
+RAM/hardware updates remain immediate. Notifications renew the 600 ms quiet
+interval; clean workers sleep indefinitely. Failed NVS writes return a 1-second
+retry deadline rather than sleeping inside a callback and delaying other clients.
+Battery monitoring/calibration stays isolated on its existing 8192-byte stack:
+no unmeasured shrinking of the earlier overflow fix. Startup sound is unchanged.
+
+Run `python3 tests/settings_persistence/run.py`, backlight/display-settings,
+system-shortcuts, startup-audio and battery-calibration host suites. These model
+creation failure, coalescing, retries, concurrent revisions and clean-idle waits;
+they do not measure real task high-water marks or NVS-call stack depth.

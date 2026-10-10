@@ -14,7 +14,13 @@ struct WiFiHAL {
     void persistent(bool value) {
         assert(!value);
     }
+    bool connectAfterStatus = false;
     int status() {
+        if (connectAfterStatus) {
+            connectAfterStatus = false;
+            statusValue = WL_CONNECTED;
+            return 0;
+        }
         return statusValue;
     }
     void setAutoReconnect(bool value) {
