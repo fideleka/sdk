@@ -1,4 +1,5 @@
 // Selector-only deterministic adapter. Actual backend is tested by scan.cpp.
+#include <Arduino.h>
 #include <lilka/wifi_scan.h>
 #include <WiFi.h>
 #include <cstring>
