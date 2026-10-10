@@ -11,12 +11,12 @@ WiFiConnection wifiConnection;
 bool WiFiConnection::load(Preferences& prefs) {
     known.clear();
     preferred = prefs.getString("last_ssid", "");
-    for (const String& name : NetworkCredentials::list(prefs)) {
+    known.reserve(NetworkCredentials::Capacity + 1);
+    for (auto& saved : NetworkCredentials::snapshot(prefs)) {
         Credential entry;
-        entry.ssid = name;
-        if (NetworkCredentials::read(prefs, name, entry.password)) {
-            known.push_back(entry);
-        }
+        entry.ssid = std::move(saved.ssid);
+        entry.password = std::move(saved.password);
+        known.push_back(std::move(entry));
     }
     return !known.empty();
 }

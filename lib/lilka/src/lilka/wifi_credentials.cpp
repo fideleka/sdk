@@ -2,6 +2,7 @@
 #include <Preferences.h>
 #include <cstring>
 #include <cstdio>
+#include <utility>
 
 namespace lilka {
 
@@ -163,6 +164,40 @@ bool NetworkCredentials::forget(Preferences& prefs, const String& ssid) {
         return false;
     }
     return true;
+}
+
+std::vector<NetworkCredentials::SavedNetwork> NetworkCredentials::snapshot(Preferences& prefs) {
+    std::vector<SavedNetwork> result;
+    result.reserve(Capacity + 1);
+    const String last = prefs.getString("last_ssid", "");
+    const String legacyKey = passwordKey(last);
+    bool selectedIndexed = false, collision = false;
+    std::vector<String> seen;
+    seen.reserve(Capacity);
+    for (unsigned slot = 0; slot < Capacity; ++slot) {
+        Record record{};
+        if (!load(prefs, slot, record)) continue;
+        const String name(record.ssid);
+        if (name == last) selectedIndexed = true; // Includes Forget tombstones.
+        else if (passwordKey(name) == legacyKey) collision = true;
+        bool duplicate = false;
+        for (const String& previous : seen)
+            duplicate |= previous == name;
+        if (duplicate) continue;
+        seen.push_back(name);
+        if (!record.active) continue;
+        SavedNetwork entry;
+        entry.ssid = name;
+        entry.password = record.password;
+        result.push_back(std::move(entry));
+    }
+    if (!selectedIndexed && !collision && valid(last) && prefs.isKey(legacyKey.c_str())) {
+        SavedNetwork entry;
+        entry.ssid = last;
+        entry.password = prefs.getString(legacyKey.c_str(), "");
+        if (entry.password.length() <= 64) result.push_back(std::move(entry));
+    }
+    return result;
 }
 
 std::vector<String> NetworkCredentials::list(Preferences& prefs) {
