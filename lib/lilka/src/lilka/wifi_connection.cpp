@@ -19,7 +19,11 @@ bool WiFiConnection::load(Preferences& prefs) {
         entry.password = std::move(saved.password);
         known.push_back(std::move(entry));
     }
-    return !known.empty();
+    if (known.empty()) {
+        releaseCandidates();
+        return false;
+    }
+    return true;
 }
 
 void WiFiConnection::releaseCandidates() {

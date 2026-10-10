@@ -84,6 +84,7 @@ int main() {
     assert(WiFi.deletes == deletes);
     Preferences::data.clear();
     assert(!selector.load(prefs));
+    assert(selector.known.capacity() == 0);
     WiFi.scanValue = WIFI_SCAN_FAILED;
     assert(selector.start(0) == State::NoCredentials);
     // IP can arrive between owner polls: cancelling must still preserve it.
