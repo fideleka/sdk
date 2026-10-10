@@ -82,6 +82,11 @@ WiFiConnection::State WiFiConnection::start(uint32_t now) {
 
 WiFiConnection::State WiFiConnection::scan(uint32_t now) {
     if (preserveConnected()) return current;
+    // Automatic discovery cannot help once every saved candidate was tried.
+    if (std::none_of(known.begin(), known.end(), [](const Credential& entry) { return !entry.tried; })) {
+        selectedPassword = "";
+        return current = State::Failed;
+    }
     scanned = true;
     // Don't consume or delete a scan started by an application UI.
     if (WiFi.scanComplete() == WIFI_SCAN_RUNNING) {
