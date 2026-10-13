@@ -1,5 +1,6 @@
 #include "brightness.h"
 #include "display.h"
+#include "pixel_dma.h"
 
 #include "default_splash.h"
 #include "spi.h"
@@ -16,6 +17,8 @@ template class GFX<Canvas>;
 
 #if LILKA_VERSION == 1
 Arduino_ESP32SPI displayBus(LILKA_DISPLAY_DC, LILKA_DISPLAY_CS, LILKA_SPI_SCK, LILKA_SPI_MOSI);
+#elif CONFIG_IDF_TARGET_ESP32S3
+PixelDMABus displayBus;
 #else
 // Arduino_ESP32SPI displayBus(
 //     LILKA_DISPLAY_DC, LILKA_DISPLAY_CS, LILKA_SPI_SCK, LILKA_SPI_MOSI, LILKA_SPI_MISO, SPI1_NUM, true
@@ -49,6 +52,16 @@ void Display::begin() {
     setFont(FONT_10x20);
     setUTF8Print(true);
     serial.log("display ok");
+}
+
+bool Display::enablePixelDMA() {
+#if LILKA_VERSION == 2 && CONFIG_IDF_TARGET_ESP32S3
+    const bool enabled = displayBus.enablePixelDMA();
+    serial.log("Native LCD pixels: %s", enabled ? "DMA" : "polling fallback");
+    return enabled;
+#else
+    return false;
+#endif
 }
 
 void Display::showStartupScreen() {
@@ -253,9 +266,8 @@ bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& incoming, uint32
     if (rotated) overlayClip = {};
     const bool labelChanged =
         !level && std::memcmp(overlayState.muteLabel, state.muteLabel, sizeof(state.muteLabel)) != 0;
-    overlayChanged = active &&
-                     (!overlayActive || rotated || overlayLevel != level || labelChanged ||
-                      overlayState.brightness != state.brightness);
+    overlayChanged = active && (!overlayActive || rotated || overlayLevel != level || labelChanged ||
+                                overlayState.brightness != state.brightness);
     if (active) overlayClip = geometry;
     overlayState = state;
     overlayActive = active;

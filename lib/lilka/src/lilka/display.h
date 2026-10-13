@@ -246,6 +246,9 @@ public:
     /// Почати роботу з дисплеєм.
     /// \warning Цей метод викликається автоматично при виклику `lilka::begin()`.
     void begin();
+    /// Enable bounded pixel DMA on ESP32-S3 during startup before worker tasks.
+    /// Defaults remain unchanged. Allocation failure keeps polling transfers.
+    bool enablePixelDMA();
     /// Відобразити вітальний екран Лілки.
     ///
     /// Цей метод відображає зображення, встановлене за допомогою `setSplash()`.
