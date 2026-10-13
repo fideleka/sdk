@@ -59,8 +59,11 @@ struct PixelDMABus::State {
         GPSPI3.dma_int_ena.trans_done = 1;
         if (gdma_start(channel, reinterpret_cast<intptr_t>(&descriptor)) != ESP_OK) fault();
         GPSPI3.cmd.update = 1;
-        while (GPSPI3.cmd.update) {
-        } // register latch only, not wire completion
+        // Only the register latch is polled, never the wire. Bound even this
+        // short hardware handshake so a stuck peripheral cannot hold SD forever.
+        for (unsigned attempts = 0; GPSPI3.cmd.update; ++attempts) {
+            if (attempts >= 1000) fault();
+        }
         GPSPI3.cmd.usr = 1;
     }
 
