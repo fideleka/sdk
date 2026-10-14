@@ -246,6 +246,53 @@ public:
     /// Почати роботу з дисплеєм.
     /// \warning Цей метод викликається автоматично при виклику `lilka::begin()`.
     void begin();
+    /// Enable shared SD-driver output after device discovery. Native-only apps remain allocation-free.
+    bool enableRouting();
+    /// Keira supplies completed layers directly; avoid a redundant retained canvas.
+    void setLayeredPresentation(bool enabled);
+    /// Bracket direct drawing into one completed external frame (nested calls supported).
+    /// Apply routed native panel power on the LCD owner (never the device worker).
+    void serviceOutputPower();
+    void displayOn() override;
+    void displayOff() override;
+    void beginFrame();
+    void endFrame();
+    void startWrite() override;
+    void endWrite() override;
+    void writeAddrWindow(int16_t x, int16_t y, uint16_t w, uint16_t h) override;
+    void writePixels(uint16_t* pixels, uint32_t count) override;
+    void writePixelPreclipped(int16_t x, int16_t y, uint16_t color) override;
+    void writeFillRectPreclipped(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) override;
+    void writeFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color) override;
+    void writeFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color) override;
+    void draw16bitRGBBitmap(int16_t x, int16_t y, uint16_t* pixels, int16_t w, int16_t h) override;
+    void draw16bitRGBBitmap(int16_t x, int16_t y, const uint16_t* pixels, int16_t w, int16_t h) override;
+    using Arduino_ST7789::drawBitmap;
+    using Arduino_ST7789::drawGrayscaleBitmap;
+    void writeSlashLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) override;
+    void drawBitmap(
+        int16_t x, int16_t y, const uint8_t* pixels, int16_t w, int16_t h, uint16_t color, uint16_t background
+    ) override;
+    void drawBitmap(
+        int16_t x, int16_t y, uint8_t* pixels, int16_t w, int16_t h, uint16_t color, uint16_t background
+    ) override;
+    void drawGrayscaleBitmap(int16_t x, int16_t y, const uint8_t* pixels, int16_t w, int16_t h) override;
+    void drawGrayscaleBitmap(int16_t x, int16_t y, uint8_t* pixels, int16_t w, int16_t h) override;
+    void drawIndexedBitmap(
+        int16_t x, int16_t y, uint8_t* pixels, uint16_t* palette, int16_t w, int16_t h, int16_t skip = 0
+    ) override;
+    void drawIndexedBitmap(
+        int16_t x, int16_t y, uint8_t* pixels, uint16_t* palette, uint8_t chroma, int16_t w, int16_t h, int16_t skip = 0
+    ) override;
+    void draw16bitRGBBitmapWithMask(
+        int16_t x, int16_t y, uint16_t* pixels, uint8_t* mask, int16_t w, int16_t h
+    ) override;
+    void draw16bitBeRGBBitmap(int16_t x, int16_t y, uint16_t* pixels, int16_t w, int16_t h) override;
+    void draw24bitRGBBitmap(int16_t x, int16_t y, const uint8_t* pixels, int16_t w, int16_t h) override;
+    void draw24bitRGBBitmap(int16_t x, int16_t y, uint8_t* pixels, int16_t w, int16_t h) override;
+    void drawChar(int16_t x, int16_t y, unsigned char character, uint16_t color, uint16_t background) override;
+    /// Native-only bulk transfer for the shared compositor; never mirrored recursively.
+    void presentNativePixels(int16_t x, int16_t y, uint16_t* pixels, int16_t w, int16_t h);
     /// Enable bounded pixel DMA on ESP32-S3 during startup before worker tasks.
     /// Defaults remain unchanged. Allocation failure keeps polling transfers.
     bool enablePixelDMA();
@@ -278,6 +325,9 @@ public:
     void draw16bitRGBBitmapWithTranColor(
         int16_t x, int16_t y, const uint16_t bitmap[], uint16_t transparent_color, int16_t w, int16_t h
     );
+    void draw16bitRGBBitmapWithTranColor(
+        int16_t x, int16_t y, uint16_t* bitmap, uint16_t transparent_color, int16_t w, int16_t h
+    ) override;
     uint8_t* getFont();
     void drawCanvasInterlaced(Canvas* canvas, bool odd);
     /// Present a canvas; automatic overlay only for complete screen frames.
@@ -299,6 +349,17 @@ public:
     void drawSystemOverlay();
 
 private:
+    Canvas* routedCanvas = nullptr;
+    bool layeredPresentation = false, routingDirty = false, nativeBypass = false, nativeWrite = true,
+         routingStarted = false, routingAllocationFailed = false, nativePanelOn = true;
+    unsigned frameDepth = 0, writeDepth = 0;
+    int16_t windowX = 0, windowY = 0;
+    uint16_t windowWidth = 0, windowHeight = 0;
+    uint32_t windowOffset = 0, routeGeneration = 0;
+    bool nativeOutput() const;
+    Canvas* routingCanvas();
+    void publishRouting();
+
     static constexpr int overlayRowWidth =
         LILKA_DISPLAY_WIDTH > LILKA_DISPLAY_HEIGHT ? LILKA_DISPLAY_WIDTH : LILKA_DISPLAY_HEIGHT;
     uint16_t overlayRow[overlayRowWidth] = {};
@@ -371,6 +432,22 @@ public:
         int16_t x, int16_t y, const uint16_t bitmap[], uint16_t transparent_color, int16_t w, int16_t h
     );
     uint8_t* getFont();
+};
+
+/// LCD-owner scope for incremental/direct drawing, including early returns.
+class DisplayFrame {
+public:
+    explicit DisplayFrame(Display& output) : output(output) {
+        output.beginFrame();
+    }
+    ~DisplayFrame() {
+        output.endFrame();
+    }
+    DisplayFrame(const DisplayFrame&) = delete;
+    DisplayFrame& operator=(const DisplayFrame&) = delete;
+
+private:
+    Display& output;
 };
 
 // Dirty (and painfully slow!) workaround to calculate text width (since getTextBounds clips result to canvas width)

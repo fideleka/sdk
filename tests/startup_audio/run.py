@@ -23,6 +23,7 @@ U8G2 = Path(os.environ.get("U8G2_CLIB", ROOT.parent / "lilka-sdk/lib/lilka/.pio/
 assert (U8G2 / "u8g2.h").is_file(), "Set U8G2_CLIB to an existing read-only dependency directory"
 with tempfile.TemporaryDirectory(prefix="lilka-startup-") as directory:
     tmp = Path(directory)
+    (tmp / "devices.h").write_text('#pragma once\nnamespace lilka { struct MockDevices { bool canCycleDisplays() const {return false;} void requestCycle() {} }; static MockDevices devices; }\n')
     for name in (
         "controller.cpp",
         "controller.h",
@@ -60,8 +61,8 @@ with tempfile.TemporaryDirectory(prefix="lilka-startup-") as directory:
     )
     host = replace_host(
         host,
-        "inline void gpio_set_direction(int, int) {}",
-        "inline void gpio_set_direction(int pin, int) { assert(pin != 0); }",
+        "inline int gpio_set_direction(int, int) { return 0; }",
+        "inline int gpio_set_direction(int pin, int) { assert(pin != 0); return 0; }",
     )
     host = replace_host(
         host,
@@ -74,7 +75,7 @@ with tempfile.TemporaryDirectory(prefix="lilka-startup-") as directory:
         "I2S.h",
         "Preferences.h",
         "serial.h",
-        "driver/uart.h",
+        "driver/uart.h", "driver/ledc.h", "driver/gpio.h", "esp_rom_gpio.h", "soc/gpio_sig_map.h",
         "freertos/FreeRTOS.h",
         "freertos/semphr.h",
         "freertos/task.h",

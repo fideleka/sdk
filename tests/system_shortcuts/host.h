@@ -77,7 +77,8 @@ constexpr int GPIO_MODE_OUTPUT = 1;
 constexpr int I2S0O_BCK_OUT_IDX = 1, I2S0O_WS_OUT_IDX = 2, I2S0O_SD_OUT_IDX = 3;
 inline void gpio_pad_select_gpio(int) {
 }
-inline void gpio_set_direction(int, int) {
+inline int gpio_set_direction(int, int) {
+    return 0;
 }
 inline void gpio_matrix_out(int, int, bool, bool) {
 }
@@ -138,3 +139,60 @@ struct MockSerial {
 };
 extern MockSerial serial;
 } // namespace lilka
+
+constexpr int ESP_OK = 0;
+constexpr int GPIO_MODE_OUTPUT_OD = 3, GPIO_FLOATING = 0;
+inline int gpio_reset_pin(int) {
+    assert(false);
+    return 0;
+}
+inline int gpio_set_pull_mode(int, int) {
+    assert(false);
+    return 0;
+}
+inline int gpio_set_level(int, int) {
+    assert(false);
+    return 0;
+}
+using ledc_mode_t = int;
+using ledc_channel_t = int;
+constexpr int LEDC_LOW_SPEED_MODE = 0, LEDC_CHANNEL_6 = 6, LEDC_CHANNEL_7 = 7, LEDC_TIMER_3 = 3;
+constexpr int LEDC_TIMER_8_BIT = 8, LEDC_AUTO_CLK = 0, LEDC_INTR_DISABLE = 0, LEDC_LS_SIG_OUT0_IDX = 73;
+struct ledc_timer_config_t {
+    int speed_mode, timer_num, duty_resolution, freq_hz, clk_cfg;
+};
+struct ledc_channel_config_t {
+    int speed_mode, channel, timer_sel, intr_type, gpio_num;
+    uint32_t duty;
+};
+inline int ledc_timer_config(const ledc_timer_config_t*) {
+    assert(false);
+    return 0;
+}
+inline int ledc_channel_config(const ledc_channel_config_t*) {
+    assert(false);
+    return 0;
+}
+inline int ledc_set_duty(int, int, uint32_t) {
+    assert(false);
+    return 0;
+}
+inline int ledc_update_duty(int, int) {
+    assert(false);
+    return 0;
+}
+inline int ledc_stop(int, int, int) {
+    assert(false);
+    return 0;
+}
+inline int ledc_bind_channel_timer(int, int, int) {
+    assert(false);
+    return 0;
+}
+inline int ledc_set_duty_with_hpoint(int, int, uint32_t, uint32_t) {
+    assert(false);
+    return 0;
+}
+inline void esp_rom_gpio_connect_out_signal(uint32_t, uint32_t, bool, bool) {
+    assert(false);
+}

@@ -13,16 +13,18 @@ public:
         int volumeSteps;
         int brightnessSteps;
         bool selectConsumed;
+        bool cycleDisplay;
     };
 
     Result scan(
-        uint16_t pressed, uint32_t now, bool enabled, bool selectAdjusting = true, bool brightnessEnabled = false
+        uint16_t pressed, uint32_t now, bool enabled, bool selectAdjusting = true, bool brightnessEnabled = false,
+        bool displayEnabled = false
     ) {
         constexpr uint16_t select = 1 << 8;
         constexpr uint16_t start = 1 << 9;
         // Cancellation survives missed release scans until the next physical press.
         if ((pressed & select) && !(previous & select)) selectConsumed = false;
-        Result result = {suppressed, 0, 0, selectConsumed};
+        Result result = {suppressed, 0, 0, selectConsumed, false};
         // Include the release scan, so no unmatched callback/release leaks out.
         suppressed &= pressed;
         active &= pressed;
@@ -47,6 +49,13 @@ public:
                 if (direction == 2) --result.brightnessSteps;
                 if (direction == 3) ++result.brightnessSteps;
             }
+        }
+        constexpr uint16_t displayButton = 1 << 7;
+        if (displayEnabled && selectAdjusting && enabled && (previous & select) && (pressed & select) &&
+            !(pressed & start) && (pressed & displayButton) && !(previous & displayButton)) {
+            suppressed |= displayButton | select;
+            selectConsumed = true;
+            result.cycleDisplay = true;
         }
         // Opposing brightness directions cancel; no out-of-phase repeat drift.
         if (brightnessEnabled && (pressed & (1 << 2)) && (pressed & (1 << 3))) {

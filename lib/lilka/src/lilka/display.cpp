@@ -1,3 +1,7 @@
+#include <new>
+#include <algorithm>
+#include "devices.h"
+#include "display_settings.h"
 #include "brightness.h"
 #include "display.h"
 #include "pixel_dma.h"
@@ -240,8 +244,23 @@ void GFX<T>::drawImageTransformed(Image* image, int16_t destX, int16_t destY, Tr
 void Display::draw16bitRGBBitmapWithTranColor(
     int16_t x, int16_t y, const uint16_t bitmap[], uint16_t transparent_color, int16_t w, int16_t h
 ) {
-    // Цей cast безпечний, оскільки Arduino_GFX.draw16bitRGBBitmapWithTranColor не змінює bitmap.
-    Arduino_ST7789::draw16bitRGBBitmapWithTranColor(x, y, const_cast<uint16_t*>(bitmap), transparent_color, w, h);
+    DisplayFrame completed(*this);
+    if (auto* canvas = routingCanvas()) {
+        canvas->draw16bitRGBBitmapWithTranColor(x, y, bitmap, transparent_color, w, h);
+        routingDirty = true;
+    }
+    if (nativeOutput()) {
+        const bool previous = nativeBypass;
+        nativeBypass = true;
+        Arduino_ST7789::draw16bitRGBBitmapWithTranColor(x, y, const_cast<uint16_t*>(bitmap), transparent_color, w, h);
+        nativeBypass = previous;
+    }
+}
+
+void Display::draw16bitRGBBitmapWithTranColor(
+    int16_t x, int16_t y, uint16_t* bitmap, uint16_t transparent_color, int16_t w, int16_t h
+) {
+    draw16bitRGBBitmapWithTranColor(x, y, static_cast<const uint16_t*>(bitmap), transparent_color, w, h);
 }
 
 uint8_t* Display::getFont() {
@@ -249,6 +268,7 @@ uint8_t* Display::getFont() {
 }
 
 void Display::presentCanvas(Canvas* canvas) {
+    DisplayFrame completed(*this);
     GFX<Display>::drawCanvas(canvas);
 }
 
@@ -331,6 +351,7 @@ bool Display::systemOverlayNeedsTransfer() const {
 }
 
 void Display::finishSystemOverlay(Canvas* const* layers, int count) {
+    DisplayFrame completed(*this);
     const auto g = overlayClip;
     if (!systemOverlayNeedsTransfer()) return;
     // One LCD window, complete final pixels only. Expiry composes black margins
@@ -362,6 +383,7 @@ void Display::finishSystemOverlay(Canvas* const* layers, int count) {
 }
 
 void Display::drawCanvas(Canvas* canvas) {
+    DisplayFrame completed(*this);
     if (canvas->x() == 0 && canvas->y() == 0 && canvas->width() == width() && canvas->height() == height()) {
         prepareSystemOverlay(audio.getVolumeOverlay(), millis());
         presentCanvasOutsideOverlay(canvas);

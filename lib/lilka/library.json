@@ -9,7 +9,8 @@
     "dependencies": {
         "moononournation/GFX Library for Arduino": "1.6.0",
         "olikraus/U8g2": "2.35.9",
-        "h2zero/NimBLE-Arduino": "1.4.3"
+        "h2zero/NimBLE-Arduino": "1.4.3",
+        "bblanchon/ArduinoJson": "7.0.4"
     },
     "homepage": "https://github.com/lilka-dev/sdk",
     "frameworks": "arduino",

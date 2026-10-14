@@ -134,6 +134,17 @@ int main(int argc,char** argv){
  assert(chords.scan(sel|right,460,true,true,true).brightnessSteps==1);
  lilka::detail::SystemShortcuts stock;stock.scan(sel,0,true);c=stock.scan(sel|left,20,true);
  assert(c.brightnessSteps==0&&!(c.suppressed&left));
+#if LILKA_VERSION == 2 && !LILKA_INDEPENDENT_BACKLIGHT
+ // Stock GPIO46 is amplifier-shared: external brightness must never PWM that pin.
+ assert(!brightness.begin() && !brightness.isEnabled() && duty==0);
+ assert(brightness.attachExternalBacklight(47,false));
+ assert(brightness.isEnabled() && !brightness.isPinReserved(46) && externalDuty==0 && duty==0);
+ assert(brightness.setActiveDisplays(false,true) && externalDuty==94 && duty==0);
+ assert(brightness.setBrightness(50) && externalDuty==128 && duty==0);
+ assert(brightness.suspend() && externalDuty==0 && duty==0);
+ assert(brightness.resume() && externalDuty==128 && duty==0);
+ brightness.detachExternalBacklight();assert(!brightness.isEnabled() && !brightness.isPWMChannelReserved(6));
+#endif
  puts("backlight host checks passed");
 }
 '''

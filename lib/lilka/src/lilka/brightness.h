@@ -4,22 +4,24 @@
 
 namespace lilka {
 
-/// Independent backlight control. Opt in with LILKA_INDEPENDENT_BACKLIGHT=1
-/// ONLY after physically isolating amplifier SD on Lilka v2.
-/// Reserves low-speed LEDC timer 3/channel 7; no other user may reconfigure them.
+/// Shared backlight level. Native PWM requires LILKA_INDEPENDENT_BACKLIGHT=1
+/// ONLY after physically isolating amplifier SD on Lilka v2. An attached external
+/// BLK can be controlled on stock v2 without touching the amplifier-shared pin.
+/// Reserves low-speed LEDC timer 3/channels 6 and 7 while active.
 class Brightness {
 public:
     /// Initialized by board.begin(). Stock boards remain unchanged.
     static bool begin();
-    /// True only when opted-in PWM initialization succeeded.
+    /// True when native PWM or an external BLK output is actually attached.
     static bool isEnabled();
     /// Arduino LEDC channels 6/7 share the reserved low-speed timer.
     static bool isPWMChannelReserved(int channel);
     /// Native and attached external GPIO ownership for safe script wrappers.
     static bool isPinReserved(int pin);
     /// Attach an extension BLK input through a series resistor. Channel 6 shares
-    /// the native 20 kHz timer; HIGH is released, never driven (open drain).
-    static bool attachExternalBacklight(int pin);
+    /// the 20 kHz timer; HIGH is released, never driven (open drain).
+    /// initiallyActive=false keeps it dark before the panel reset/black initialization.
+    static bool attachExternalBacklight(int pin, bool initiallyActive = true);
     static void detachExternalBacklight();
     /// Route backlights without changing selected/saved brightness or overrides.
     static bool setActiveDisplays(bool native, bool external);
@@ -43,6 +45,7 @@ public:
     static bool isDimmed();
 
 private:
+    static bool beginOutput();
     static uint32_t servicePersistence();
 };
 

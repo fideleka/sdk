@@ -1,0 +1,9 @@
+{
+  "abi": 1,
+  "driver_uuid": "cfa4bc25-c2d6-4a18-ade9-16506b19acf1",
+  "device_uuid": "674db8e0-cd55-4bfb-90b0-1e521e97c1cd",
+  "name": "ILI9341 display",
+  "type": "display",
+  "module": "driver.so",
+  "version": "1.1.6"
+}

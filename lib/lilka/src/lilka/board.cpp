@@ -4,6 +4,7 @@
 #include "brightness.h"
 #include "display.h"
 #include "config.h"
+#include "devices.h"
 
 namespace lilka {
 
@@ -27,6 +28,7 @@ void Board::enablePowerSavingMode() {
     if (brightness.isEnabled()) brightness.suspend();
     else digitalWrite(LILKA_SLEEP, LOW);
 #endif
+    devices.setSleeping(true);
     display.displayOff();
 }
 
@@ -35,6 +37,7 @@ void Board::disablePowerSavingMode() {
     if (brightness.isEnabled()) brightness.resume();
     else digitalWrite(LILKA_SLEEP, HIGH);
 #endif
+    devices.setSleeping(false);
     display.displayOn();
 }
 
