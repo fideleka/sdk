@@ -438,9 +438,12 @@ int main(int argc,char**argv){
  assert(m.displayMode()==DeviceManager::Internal&&m.cycleRequests==0);
  m.deactivate();assert(allocations.empty());
  }
- // A saved external mode must not re-illuminate a new firmware's startup.
+ // Restore the selected route, but Select-held recovery forces Internal.
  nvm.clear();nvm["displayMode"]={DeviceManager::Both};
- {DeviceManager m;registered(m,0);assert(m.begin(false));assert(m.displayMode()==DeviceManager::Internal);assert(m.begin(false));}
+ {DeviceManager m;registered(m,0);assert(m.begin(false));assert(m.displayMode()==DeviceManager::Both);assert(m.begin(false));}
+ {DeviceManager m;assert(m.begin(true));assert(m.displayMode()==DeviceManager::Internal);}
+ nvm["displayMode"]={255};
+ {DeviceManager m;assert(m.begin(false));assert(m.displayMode()==DeviceManager::Internal);}
  puts("PASS: shared frames/20 in-flight updates/latest-wins, 40 MHz persistence, queued DMA/quarantine, partial/full frames, legacy ABI, overlays, allocation rollback, 20 toggles and ELF bounds");
 }
 '''

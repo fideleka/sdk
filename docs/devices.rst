@@ -26,10 +26,11 @@ external imports; an SD module is trusted native code, not a sandboxed program.
 Modes and presentation
 ----------------------
 
-Every boot deliberately starts **Internal**: the external panel is initialized
-black with scanout off. A previously saved external mode is not restored;
-hardware settings and the selected device are still restored. **Select + D**
-cycles Internal -> External -> Both -> Internal. Hold Select first, then press D.
+The saved display mode is restored after reset. Without a saved choice the mode
+is **Internal**. Hold Select at boot to skip SD drivers and recover Internal mode.
+The external panel is initialized black/off before a complete frame is presented.
+**Select + A** cycles Internal -> External -> Both -> Internal. Hold Select first,
+then press A.
 There is one action per press, no held-button repeating, and consumed keys are
 not sent to the game. Select + Start and wake-gesture suppression retain priority.
 The input scanner queues the request; SPI, allocation and NVS run off that task.
