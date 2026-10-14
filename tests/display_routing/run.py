@@ -22,8 +22,10 @@ inline uint32_t millis(){return now;}
 class Canvas {
     int w,h;
 public:
+    enum class Memory { Default, PSRAMOnly };
     std::vector<uint16_t> pixels;
     Canvas(int w,int h):w(w),h(h),pixels(w*h,0){}
+    Canvas(int w,int h,Memory memory):Canvas(w,h){assert(memory==Memory::PSRAMOnly);}
     int width(){return w;}int height(){return h;}
     uint16_t*getFramebuffer(){return pixels.data();}
     void fillScreen(uint16_t color){std::fill(pixels.begin(),pixels.end(),color);}

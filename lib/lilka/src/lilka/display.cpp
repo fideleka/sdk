@@ -13,6 +13,7 @@
 #include "buzzer.h"
 #include "audio.h"
 #include <cstring>
+#include <esp_heap_caps.h>
 
 namespace lilka {
 
@@ -438,6 +439,21 @@ Canvas::Canvas(uint16_t width, uint16_t height) : Arduino_Canvas(width, height, 
     setFont(u8g2_font_10x20_t_cyrillic);
     setUTF8Print(true);
     begin();
+}
+
+Canvas::Canvas(uint16_t width, uint16_t height, Memory memory) : Arduino_Canvas(width, height, NULL) {
+    if (memory == Memory::Default) begin();
+    else {
+#if LILKA_VERSION == 2
+        const size_t pixels = static_cast<size_t>(width) * height;
+        if (pixels && pixels <= SIZE_MAX / sizeof(uint16_t))
+            _framebuffer = static_cast<uint16_t*>(
+                heap_caps_aligned_alloc(16, pixels * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
+            );
+#endif
+    }
+    setFont(u8g2_font_10x20_t_cyrillic);
+    setUTF8Print(true);
 }
 
 Canvas::Canvas(uint16_t x, uint16_t y, uint16_t width, uint16_t height) :

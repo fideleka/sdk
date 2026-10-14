@@ -19,7 +19,7 @@ Canvas* Display::routingCanvas() {
         routedCanvas = nullptr;
     }
     if (!routedCanvas && !routingAllocationFailed) {
-        routedCanvas = new (std::nothrow) Canvas(width(), height());
+        routedCanvas = new (std::nothrow) Canvas(width(), height(), Canvas::Memory::PSRAMOnly);
         if (routedCanvas && !routedCanvas->getFramebuffer()) {
             delete routedCanvas;
             routedCanvas = nullptr;

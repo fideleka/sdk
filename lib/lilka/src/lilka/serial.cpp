@@ -25,11 +25,7 @@ void serial_err(const char* format, ...) {
 }
 
 int serial_idf(const char* format, va_list args) {
-    char buffer[TX_BUFFER_SIZE];
-
-    int cnt = vsnprintf(buffer, sizeof(buffer), format, args);
-    serial.idf("%s", buffer);
-    return cnt;
+    return serial.idfV(format, args);
 }
 
 SerialInterface::SerialInterface() {
@@ -69,7 +65,10 @@ void SerialInterface::enqueue(const char* level, const char* text) {
     String line(record);
     if (line.isEmpty() || line[line.length() - 1] != '\n') line += '\n';
     // Never wait behind output, Wi-Fi callbacks or another formatter.
-    if (!serialMutex || !xSemaphoreTake(serialMutex, 0)) { ++dropped; return; }
+    if (!serialMutex || !xSemaphoreTake(serialMutex, 0)) {
+        ++dropped;
+        return;
+    }
     if (serialQueue.size() < QueueLimit) serialQueue.push(line);
     else ++dropped;
     xSemaphoreGive(serialMutex);
@@ -94,12 +93,17 @@ void SerialInterface::err(const char* format, ...) {
 }
 
 void SerialInterface::idf(const char* format, ...) {
-    char text[TX_BUFFER_SIZE];
     va_list args;
     va_start(args, format);
-    vsnprintf(text, sizeof(text), format, args);
+    idfV(format, args);
     va_end(args);
+}
+
+int SerialInterface::idfV(const char* format, va_list args) {
+    char text[TX_BUFFER_SIZE];
+    const int count = vsnprintf(text, sizeof(text), format, args);
     enqueue(LILKA_IDF_FORMAT, text);
+    return count;
 }
 
 void SerialInterface::writeGreetingMessage() {
@@ -152,7 +156,10 @@ void SerialInterface::writeGreetingMessage() {
 void SerialInterface::drainOnce() {
     if (pending.isEmpty()) {
         if (!serialMutex || !xSemaphoreTake(serialMutex, 0)) return;
-        if (!serialQueue.empty()) { pending = serialQueue.front(); serialQueue.pop(); }
+        if (!serialQueue.empty()) {
+            pending = serialQueue.front();
+            serialQueue.pop();
+        }
         xSemaphoreGive(serialMutex);
         pendingOffset = 0;
     }
@@ -164,7 +171,10 @@ void SerialInterface::drainOnce() {
     const size_t count = remaining < size_t(available) ? remaining : size_t(available);
     const size_t written = Serial.write(reinterpret_cast<const uint8_t*>(pending.c_str() + pendingOffset), count);
     pendingOffset += written < count ? written : count;
-    if (pendingOffset == pending.length()) { pending = ""; pendingOffset = 0; }
+    if (pendingOffset == pending.length()) {
+        pending = "";
+        pendingOffset = 0;
+    }
 }
 
 void SerialInterface::run() {

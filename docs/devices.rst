@@ -100,3 +100,8 @@ external PWM. Target-header syntax checks are separate from full builds/links.
 Neither host pixels nor source checks establish physical shimmer, PWM quality,
 frame rate or long-run simultaneous audio behaviour. Display aggregate logging
 is optional through ``LILKA_MEASURE_DISPLAY``; no per-frame serial output is added.
+
+The SDK retained direct-drawing framebuffer uses explicit PSRAM-only allocation
+(134400 bytes at 280x240). If PSRAM allocation fails, routing falls back to the
+native display instead of consuming internal RAM needed by task stacks/DMA.
+Existing application Canvas constructors retain their default allocation policy.

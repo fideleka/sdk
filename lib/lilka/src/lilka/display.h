@@ -414,12 +414,15 @@ private:
 /// @endcode
 class Canvas : public Arduino_Canvas, public GFX<Canvas> {
 public:
+    enum class Memory { Default, PSRAMOnly };
     /// Створити буфер зі стандартним розміром (який дорівнює розміру дисплею).
     Canvas();
     /// Створити буфер з заданими розмірами.
     /// @param w Ширина буфера.
     /// @param h Висота буфера.
     Canvas(uint16_t w, uint16_t h);
+    /// Explicit buffer placement. PSRAMOnly never consumes internal RAM on failure.
+    Canvas(uint16_t w, uint16_t h, Memory memory);
     /// Створити буфер з заданими розмірами та позицією.
     /// @param x Координата X лівого верхнього кута буфера.
     /// @param y Координата Y лівого верхнього кута буфера.

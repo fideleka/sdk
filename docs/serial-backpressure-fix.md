@@ -9,3 +9,10 @@ Preformatted helper, IDF and VFS text now uses explicit %s forwarding, preventin
 Host ASan/UBSan fixtures execute extracted production enqueue/log/err/idf/drainOnce methods: zero output capacity over 10000 ticks, partial/zero writes, reconnect drainage, bounded queue/drops, lock contention, concurrent producers, literal percent data and truncation. Existing source-radio initializer compatibility test passed. Actual ESP32-S3 installed-header syntax-only check passed (existing VFS/header warnings remain); no objects, firmware linking, dependencies or flashing. make clang-format and make cppcheck were attempted but tools are absent; neither gate is claimed passed.
 
 Device acceptance: rebuild LilPlayer using this SDK branch, test rapid stream switches/pause/resume with serial monitor closed, open and disconnected/reconnected. Capture logger task and stack/heap metrics if the freeze remains. LP and SDK are separate serial writers, so complete line interleaving is not solved by this fix; garbled/interleaved lines alone do not prove a lock.
+
+IDF callbacks now forward their va_list directly to a single formatter, avoiding
+a second nested 256-byte text buffer and redundant formatting. The public idf
+variadic API, return counts, literal-percent handling and queue limits remain
+unchanged. ESP32-S3 -Os target-object checks reduce the SDK callback/formatter
+frames from 304+336 to 48+304 bytes (288 bytes less); this is not a full device
+stack watermark or proof of every system-event mutex corruption cause.
