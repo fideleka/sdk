@@ -5,5 +5,5 @@
   "name": "ILI9341 display",
   "type": "display",
   "module": "driver.so",
-  "version": "1.1.7"
+  "version": "1.1.8"
 }

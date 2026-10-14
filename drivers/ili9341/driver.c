@@ -14,9 +14,8 @@ typedef struct {
 } State;
 static const char* const pin_names[] = {"GPIO12", "GPIO13", "GPIO14", "GPIO21", "GPIO47", "GPIO48"};
 static const int32_t pins[] = {12, 13, 14, 21, 47, 48};
-static const char* const speed_names[] =
-    {"10 MHz", "20 MHz", "40 MHz (test)", "50 MHz (test)", "60 MHz (test)", "70 MHz (test)", "80 MHz (test)"};
-static const uint32_t speeds[] = {10000000, 20000000, 40000000, 50000000, 60000000, 70000000, 80000000};
+static const char* const speed_names[] = {"10 MHz", "20 MHz", "40 MHz", "80 MHz"};
+static const uint32_t speeds[] = {10000000, 20000000, 40000000, 80000000};
 static const char* const rotation_names[] = {"Automatic", "Automatic, flipped"};
 static const char* const refresh_names[] = {"15 FPS", "20 FPS", "30 FPS", "60 FPS"};
 static const uint32_t intervals[] = {67, 50, 34, 17};
@@ -29,12 +28,13 @@ static const kd_setting settings[] = {
     {2, "MOSI pin", KD_SETTING_CHOICE, 1, 0, 5, 1, pin_names},
     {3, "Reset pin", KD_SETTING_CHOICE, 2, 0, 5, 1, pin_names},
     {4, "DC pin", KD_SETTING_CHOICE, 3, 0, 5, 1, pin_names},
-    {5, "SPI speed", KD_SETTING_CHOICE, 1, 0, 6, 1, speed_names},
+    {10, "Backlight pin", KD_SETTING_CHOICE, 0, 0, 2, 1, backlight_names},
+    // New ID avoids reinterpreting the old seven-speed persisted indices.
+    {12, "SPI speed", KD_SETTING_CHOICE, 1, 0, 3, 1, speed_names},
     {6, "Orientation", KD_SETTING_CHOICE, 0, 0, 1, 1, rotation_names},
     {7, "Refresh limit", KD_SETTING_CHOICE, 2, 0, 3, 1, refresh_names},
     // ID 8 belonged to the removed full-frame experiment. Never reinterpret it.
     {9, "Panel drive", KD_SETTING_CHOICE, 0, 0, 3, 1, drive_names},
-    {10, "Backlight pin", KD_SETTING_CHOICE, 0, 0, 2, 1, backlight_names},
     {11, "SPI test", KD_SETTING_CHOICE, 0, 0, 2, 1, test_names},
 };
 static int command(const kd_host* host, uint8_t code, const uint8_t* bytes, uint32_t count) {
@@ -56,7 +56,7 @@ static int enable(const void* api, void* memory) {
             pins[host->setting(host->context, 2)],
             pins[host->setting(host->context, 4)],
             pins[host->setting(host->context, 3)],
-            speeds[host->setting(host->context, 5)]
+            speeds[host->setting(host->context, 12)]
         ))
         return -1;
     state->opened = 1;
@@ -191,7 +191,7 @@ static const kd_device descriptor = {
     "cfa4bc25-c2d6-4a18-ade9-16506b19acf1",
     "674db8e0-cd55-4bfb-90b0-1e521e97c1cd",
     "ILI9341 display",
-    "1.1.7",
+    "1.1.8",
     1,
     sizeof(settings) / sizeof(settings[0]),
     settings,

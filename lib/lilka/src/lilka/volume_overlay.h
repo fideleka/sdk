@@ -13,6 +13,8 @@ struct VolumeOverlaySnapshot {
     uint32_t adjustedAt = 0;
     bool valid = false;
     bool brightness = false;
+    /// -1: level feedback; 0/1/2: internal/external/both display selection.
+    int8_t displayMode = -1;
     /// Owned UTF-8 BMP label (31 bytes + terminator). Standalone default.
     /// Label changes do not renew the feedback timeout.
     char muteLabel[32] = "Mute";
@@ -115,18 +117,29 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     target.fillRect(g.x, g.y, g.width, g.height, black);
     target.drawRect(g.x, g.y, g.width, g.height, white);
     target.drawRect(g.x + 1, g.y + 1, g.width - 2, g.height - 2, white);
-    target.drawRect(g.barX, g.barY, g.barWidth, g.barHeight, white);
+    const bool modeFeedback = state.displayMode >= 0 && state.displayMode <= 2;
+    if (modeFeedback) {
+        // Two monitor silhouettes: cyan means enabled, gray means disabled.
+        for (int screen = 0; screen < 2; ++screen) {
+            const bool enabled = state.displayMode == 2 || state.displayMode == screen;
+            const int x = g.x + g.width / 2 - 40 + screen * 48;
+            target.drawRect(x, g.barY, 32, 16, white);
+            target.fillRect(x + 2, g.barY + 2, 28, 12, enabled ? cyan : 0x4208);
+            target.fillRect(x + 14, g.barY + 16, 4, 3, white);
+            target.fillRect(x + 8, g.barY + 19, 16, 2, white);
+        }
+    } else target.drawRect(g.barX, g.barY, g.barWidth, g.barHeight, white);
     const int level = state.level < 0 ? 0 : (state.level > 100 ? 100 : state.level);
     const int filled = (g.barWidth - 4) * level / 100;
-    if (filled) target.fillRect(g.barX + 2, g.barY + 2, filled, g.barHeight - 4, cyan);
+    if (filled && !modeFeedback) target.fillRect(g.barX + 2, g.barY + 2, filled, g.barHeight - 4, cyan);
     char text[5] = {};
     int count = 0;
     if (level == 100) text[count++] = '1';
     if (level >= 10) text[count++] = '0' + (level / 10) % 10;
     text[count++] = '0' + level % 10;
     text[count++] = '%';
-    const char* label = text;
-    const size_t capacity = sizeof(text);
+    const char* label = modeFeedback ? state.muteLabel : text;
+    const size_t capacity = modeFeedback ? sizeof(state.muteLabel) : sizeof(text);
     VolumeOverlayFontTarget<Target> context{};
     context.target = &target;
     auto& decoder = context.decoder;
@@ -150,7 +163,9 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
     // Centre a compact icon + numeric percentage, with no language-dependent words.
     const int iconX = g.x + (g.width - advance - 26) / 2;
     const int iconY = g.y + 17;
-    if (state.brightness) {
+    if (modeFeedback) {
+        // Display-mode feedback uses the monitor silhouettes below the text.
+    } else if (state.brightness) {
         for (int y = -4; y <= 4; ++y)
             for (int x = -4; x <= 4; ++x) {
                 const int distance = x * x + y * y;
@@ -161,7 +176,8 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
         target.fillRect(iconX, iconY + 8, 3, 2, white);
         target.fillRect(iconX + 16, iconY + 8, 3, 2, white);
         for (int x = 2; x <= 14; x += 12)
-            for (int y = 2; y <= 14; y += 12) target.fillRect(iconX + x, iconY + y, 2, 2, white);
+            for (int y = 2; y <= 14; y += 12)
+                target.fillRect(iconX + x, iconY + y, 2, 2, white);
     } else {
         target.fillRect(iconX, iconY + 6, 4, 6, white);
         target.fillRect(iconX + 4, iconY + 4, 2, 10, white);
@@ -170,10 +186,11 @@ void drawVolumeOverlay(Target& target, const VolumeOverlaySnapshot& state, int w
             target.fillRect(iconX + 11, iconY + 5, 2, 8, white);
             target.fillRect(iconX + 15, iconY + 3, 2, 12, white);
         } else {
-            for (int i = 0; i < 16; ++i) target.fillRect(iconX + i, iconY + i, 1, 2, white);
+            for (int i = 0; i < 16; ++i)
+                target.fillRect(iconX + i, iconY + i, 1, 2, white);
         }
     }
-    int x = iconX + 26;
+    int x = modeFeedback ? g.x + (g.width - advance) / 2 : iconX + 26;
     offset = 0;
     while ((glyph = volumeOverlayNextGlyph(label, capacity, offset)))
         x += u8g2_DrawGlyph(&decoder, x, g.y + 32, glyph);

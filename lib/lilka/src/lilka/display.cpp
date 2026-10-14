@@ -279,16 +279,20 @@ bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& incoming, uint32
     if (light.visible(now) && (!state.visible(now) || now - light.adjustedAt < now - state.adjustedAt)) {
         state = light;
     }
+    const auto selection = devices.getOverlay();
+    if (selection.visible(now) && (!state.visible(now) || now - selection.adjustedAt < now - state.adjustedAt))
+        state = selection;
     const bool rotated = overlayWidth != width() || overlayHeight != height() || overlayRotation != getRotation();
     const auto geometry = volumeOverlayGeometry(width(), height());
     const bool active = state.visible(now) && geometry.width && width() <= overlayRowWidth;
     const int level = state.level < 0 ? 0 : (state.level > 100 ? 100 : state.level);
     // Old LCD coordinates are invalid after rotation. Caller redraws background.
     if (rotated) overlayClip = {};
-    const bool labelChanged =
-        !level && std::memcmp(overlayState.muteLabel, state.muteLabel, sizeof(state.muteLabel)) != 0;
-    overlayChanged = active && (!overlayActive || rotated || overlayLevel != level || labelChanged ||
-                                overlayState.brightness != state.brightness);
+    const bool labelChanged = (!level || state.displayMode >= 0) &&
+                              std::memcmp(overlayState.muteLabel, state.muteLabel, sizeof(state.muteLabel)) != 0;
+    overlayChanged =
+        active && (!overlayActive || rotated || overlayLevel != level || labelChanged ||
+                   overlayState.brightness != state.brightness || overlayState.displayMode != state.displayMode);
     if (active) overlayClip = geometry;
     overlayState = state;
     overlayActive = active;

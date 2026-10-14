@@ -117,7 +117,7 @@ struct Display{
 };
 inline Display display;
 class Canvas{std::vector<uint16_t>data;int px,py,w,h;public:Canvas(int x,int y,int width,int height):data(width*height),px(x),py(y),w(width),h(height){}int width(){return w;}int height(){return h;}int x(){return px;}int y(){return py;}uint16_t*getFramebuffer(){return data.data();}};
-struct VolumeOverlaySnapshot{bool valid=false;bool visible(uint32_t)const{return valid;}};
+struct VolumeOverlaySnapshot{bool valid=false;uint32_t adjustedAt=0;int displayMode=-1;char muteLabel[32]={};bool visible(uint32_t now)const{return valid&&now-adjustedAt<1200;}};
 struct VolumeOverlayGeometry{int x,y,width,height;};
 inline VolumeOverlayGeometry volumeOverlayGeometry(int,int){return {100,100,40,20};}
 struct VolumeOverlayRow{uint16_t*pixels;int x,y,width;void fillRect(int l,int t,int w,int h,uint16_t c){if(y<t||y>=t+h)return;for(int i=std::max(x,l);i<std::min(x+width,l+w);++i)pixels[i-x]=c;}};
@@ -209,7 +209,7 @@ int main(int argc,char**argv){
  assert(!m.setEnabled(0,true));assert(strstr(m.slots[0].status,"DMA buffer allocation: ESP_ERR_NO_MEM"));assert(allocations.empty()&&!busBusy);
  failDma=false;
  assert(m.internalOutput()&&!m.externalOutput());assert(allocations.empty());
- m.slots[0].values[4]=2;assert(m.setEnabled(0,true));assert(m.spiHz==40000000);assert(m.slots[0].active&&m.internalOutput()&&!m.frame);
+ m.slots[0].values[5]=2;assert(m.setEnabled(0,true));assert(m.spiHz==40000000);assert(m.slots[0].active&&m.internalOutput()&&!m.frame);
  assert(m.extensionPinOwned(12)&&m.extensionPinOwned(13)&&m.extensionPinOwned(14)&&m.extensionPinOwned(21));
  assert(!m.extensionPinOwned(47)&&!m.extensionPinOwned(48));
  assert(m.setDisplayMode(DeviceManager::Both));assert(m.externalOutput()&&m.internalOutput());
@@ -260,7 +260,7 @@ int main(int argc,char**argv){
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
  assert(m.transferPixels-pixelsBefore==280&&m.rowTransfers==rowsBefore+1&&m.frame[40*280+20]==0xabcd);
  // Even an installed 1.1.2 descriptor requesting full flush is ignored.
- assert(m.slots[0].descriptor->setting_count==10&&m.slots[0].descriptor->settings[7].id==9);
+ assert(m.slots[0].descriptor->setting_count==10&&m.slots[0].descriptor->settings[8].id==9);
  const auto*rowCurrent=m.slots[0].descriptor;kd_device retired=*rowCurrent;
  retired.size=offsetof(kd_device,backlight_pin);retired.prefer_full_frame=[](const void*,void*)->uint32_t{assert(false);return 1;};
  m.slots[0].descriptor=&retired;
@@ -274,7 +274,7 @@ int main(int argc,char**argv){
  small.getFramebuffer()[40]=0x5678;assert(m.capture(nullptr,&small,none,false));
  assert(m.dirtyRows[41/32]&(uint32_t(1)<<(41%32)));
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
- lilka::VolumeOverlaySnapshot shown;shown.valid=true;
+ lilka::VolumeOverlaySnapshot shown;shown.valid=true;shown.adjustedAt=fakeTime;
  assert(m.capture(nullptr,&small,shown,false)&&m.frame[100*280+100]==0xffff);
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
  assert(m.capture(nullptr,&small,none,false)&&m.frame[100*280+100]==0);
@@ -325,18 +325,18 @@ int main(int argc,char**argv){
  assert(m.setEnabled(0,true));const auto count=allocations.size();
  // Duplicate pins fail activation and restore the previous working setting.
  assert(!m.changeSetting(0,1,-1));assert(m.slots[0].values[1]==1&&m.slots[0].active&&allocations.size()==count);
- assert(m.changeSetting(0,5,1));assert(m.slots[0].values[5]==1);
+ assert(m.changeSetting(0,6,1));assert(m.slots[0].values[6]==1);
  for(int i=0;i<20;++i){assert(m.setEnabled(0,false));assert(allocations.empty());assert(m.setEnabled(0,true));assert(allocations.size()==count);}
  assert(m.setEnabled(0,false));
  }
  assert(allocations.empty());
  {
- DeviceManager m;registered(m,0);assert(m.restore(m.slots[0]));assert(m.slots[0].values[5]==1);
+ DeviceManager m;registered(m,0);assert(m.restore(m.slots[0]));assert(m.slots[0].values[6]==1);
  // Persisted settings are matched by stable field IDs, not field order.
  Record record;memcpy(&record,nvm["d00"].data(),sizeof(record));std::swap(record.fields[0],record.fields[5]);
- memcpy(nvm["d00"].data(),&record,sizeof(record));m.slots[0].values[5]=0;assert(m.restore(m.slots[0]));assert(m.slots[0].values[5]==1);
+ memcpy(nvm["d00"].data(),&record,sizeof(record));m.slots[0].values[6]=0;assert(m.restore(m.slots[0]));assert(m.slots[0].values[6]==1);
  record.schema=99;memcpy(nvm["d00"].data(),&record,sizeof(record));assert(!m.restore(m.slots[0]));assert(m.slots[0].readOnly);assert(!m.setEnabled(0,true));
- assert(m.resetSettings(0));assert(!m.slots[0].readOnly&&m.slots[0].values[5]==0);
+ assert(m.resetSettings(0));assert(!m.slots[0].readOnly&&m.slots[0].values[6]==0);
  }
  assert(allocations.empty());
  {
@@ -380,39 +380,59 @@ int main(int argc,char**argv){
  {
  DeviceManager m;registered(m,0);
  assert(m.slots[0].descriptor->settings_version==1);
- assert(m.slots[0].descriptor->settings[4].default_value==1&&m.slots[0].descriptor->settings[4].maximum==6);
- assert(!strcmp(m.slots[0].descriptor->settings[4].choices[2],"40 MHz (test)"));
- assert(!strcmp(m.slots[0].descriptor->settings[4].choices[6],"80 MHz (test)"));
+ assert(m.slots[0].descriptor->settings[5].default_value==1&&m.slots[0].descriptor->settings[5].maximum==3);
+ assert(!strcmp(m.slots[0].descriptor->settings[5].choices[2],"40 MHz"));
+ assert(!strcmp(m.slots[0].descriptor->settings[5].choices[3],"80 MHz"));
  m.slots[0].state=(void*)1;
  assert(DeviceManager::spiOpen(&m.slots[0],12,13,21,14,80000001));assert(!busBusy&&!m.spiOwner);
  assert(strstr(m.slots[0].status,"Invalid SPI speed"));m.slots[0].state=nullptr;
- m.slots[0].values[4]=2;assert(m.persist(m.slots[0]));m.slots[0].values[4]=1;
- assert(m.restore(m.slots[0])&&m.slots[0].values[4]==2); // Existing saved index remains 40 MHz.
+ m.slots[0].values[5]=2;assert(m.persist(m.slots[0]));m.slots[0].values[5]=1;
+ assert(m.restore(m.slots[0])&&m.slots[0].values[5]==2); // Existing saved index remains 40 MHz.
+ // Every old SPI choice migrates by stable ID, independent of descriptor order.
+ for(int legacy=0;legacy<=6;++legacy){
+  assert(m.persist(m.slots[0]));
+  for(auto& entry:nvm){if(entry.second.size()==sizeof(Record)){
+   Record saved;std::memcpy(&saved,entry.second.data(),sizeof saved);
+   if(!strcmp(saved.uuid,m.slots[0].uuid)){
+    for(unsigned j=0;j<saved.count;++j)if(saved.fields[j].id==12){saved.fields[j].id=5;saved.fields[j].value=legacy;}
+    std::memcpy(entry.second.data(),&saved,sizeof saved);
+   }
+  }}
+  m.slots[0].values[5]=-1;assert(m.restore(m.slots[0]));
+  assert(m.slots[0].values[5]==(legacy==6?3:legacy>2?2:legacy));
+ }
+ m.slots[0].values[5]=2;assert(m.persist(m.slots[0]));
  // Saved 1.1.2 mode=whole (id8) is ignored without resetting pins/saved40MHz.
  for(auto& entry:nvm){if(entry.second.size()==sizeof(Record)){
   Record saved;std::memcpy(&saved,entry.second.data(),sizeof saved);
-  if(!strcmp(saved.uuid,m.slots[0].uuid)){saved.count=8;saved.fields[7].id=8;saved.fields[7].value=1;std::memcpy(entry.second.data(),&saved,sizeof saved);}
+  if(!strcmp(saved.uuid,m.slots[0].uuid)){saved.count=8;saved.fields[4].id=8;saved.fields[4].value=1;std::memcpy(entry.second.data(),&saved,sizeof saved);}
  }}
- assert(m.restore(m.slots[0])&&m.slots[0].values[4]==2&&m.slots[0].values[7]==0&&!m.slots[0].readOnly);
+ assert(m.restore(m.slots[0])&&m.slots[0].values[5]==2&&m.slots[0].values[8]==0&&!m.slots[0].readOnly);
  assert(m.setEnabled(0,true));assert(m.spiHz==40000000);
  // Backlight field preserves pin/SPI settings from a real old 8-field blob.
  for(auto& entry:nvm){if(entry.second.size()==sizeof(Record)){Record saved;std::memcpy(&saved,entry.second.data(),sizeof saved);saved.count=8;std::memcpy(entry.second.data(),&saved,sizeof saved);entry.second.resize(offsetof(Record,fields)+8*sizeof(Record::Field));}}
- assert(m.restore(m.slots[0])&&m.slots[0].values[4]==2&&m.slots[0].values[8]==0&&m.slots[0].values[9]==0);
+ assert(m.restore(m.slots[0])&&m.slots[0].values[5]==2&&m.slots[0].values[4]==0&&m.slots[0].values[9]==0);
  assert(m.persist(m.slots[0]));
  // Conflicting backlight pins must roll back without changing native brightness.
  m.slots[0].values[0]=4;assert(m.activate(0)); // SPI clock temporarily uses GPIO47.
- assert(!m.changeSetting(0,8,1)&&m.slots[0].values[8]==0&&m.active==0);
+ assert(!m.changeSetting(0,4,1)&&m.slots[0].values[4]==0&&m.active==0);
  m.slots[0].values[0]=0;assert(m.activate(0));
- assert(m.changeSetting(0,8,1));assert(m.backlightPin==47&&m.extensionPinOwned(47));
+ assert(m.changeSetting(0,4,1));assert(m.backlightPin==47&&m.extensionPinOwned(47));
  assert(lilka::brightness.pin==47);
  assert(m.setDisplayMode(DeviceManager::External));assert(!lilka::brightness.native&&lilka::brightness.external);
+ const auto externalFeedback=m.getOverlay();
+ assert(externalFeedback.visible(fakeTime)&&externalFeedback.displayMode==1&&!strcmp(externalFeedback.muteLabel,"External"));
+ fakeTime+=10;assert(m.setDisplayMode(DeviceManager::External));assert(m.getOverlay().adjustedAt==externalFeedback.adjustedAt);
+ failNvs=true;assert(!m.setDisplayMode(DeviceManager::Both));failNvs=false;
+ assert(m.displayMode()==DeviceManager::External&&m.getOverlay().displayMode==1&&m.getOverlay().adjustedAt==externalFeedback.adjustedAt);
+ fakeTime=externalFeedback.adjustedAt+1200;assert(!m.getOverlay().visible(fakeTime));
  assert(m.setDisplayMode(DeviceManager::Both));assert(lilka::brightness.native&&lilka::brightness.external);
  assert(m.setDisplayMode(DeviceManager::Internal));assert(lilka::brightness.native&&!lilka::brightness.external);
  m.deactivate();assert(lilka::brightness.pin==-1&&!m.extensionPinOwned(47));
- m.slots[0].values[8]=0;assert(m.activate(0));
+ m.slots[0].values[4]=0;assert(m.activate(0));
  // Panel-drive choices emit only documented B1/B4 overrides; default unchanged.
  for(int mode=0;mode<4;++mode){
-  assert(m.setEnabled(0,false));m.slots[0].values[7]=mode;wireChunks.clear();assert(m.setEnabled(0,true));
+  assert(m.setEnabled(0,false));m.slots[0].values[8]=mode;wireChunks.clear();assert(m.setEnabled(0,true));
   std::map<unsigned,std::vector<uint8_t>> regs;unsigned cmd=0;
   for(const auto&chunk:wireChunks){if(!chunk.first){assert(chunk.second.size()==1);cmd=chunk.second[0];regs[cmd].clear();}else regs[cmd].insert(regs[cmd].end(),chunk.second.begin(),chunk.second.end());}
   const uint8_t rates[]={0x18,0x1b,0x1f,0x18};
@@ -421,10 +441,10 @@ int main(int argc,char**argv){
   assert(!regs.count(0x21)&&regs[0x3a]==std::vector<uint8_t>({0x55}));
   assert(regs[0xc5]==std::vector<uint8_t>({0x3e,0x28})&&regs[0xc7]==std::vector<uint8_t>({0x86}));
  }
- assert(m.persist(m.slots[0]));m.slots[0].values[7]=0;assert(m.restore(m.slots[0])&&m.slots[0].values[7]==3);
- for(int i=0;i<3;++i)assert(m.changeSetting(0,7,-1));assert(m.slots[0].values[7]==0);
- for(int index=3;index<=6;++index){assert(m.changeSetting(0,4,1));const int requests[]={0,0,0,50000000,60000000,70000000,80000000};assert(m.slots[0].values[4]==index&&openedClock==requests[index]&&m.spiRequestedHz==unsigned(requests[index]));assert(m.spiHz==unsigned(index<=4?40000000:80000000));}
- for(int index=5;index>=2;--index){assert(m.changeSetting(0,4,-1));assert(m.slots[0].values[4]==index);}
+ assert(m.persist(m.slots[0]));m.slots[0].values[8]=0;assert(m.restore(m.slots[0])&&m.slots[0].values[8]==3);
+ for(int i=0;i<3;++i)assert(m.changeSetting(0,8,-1));assert(m.slots[0].values[8]==0);
+ assert(m.changeSetting(0,5,1));assert(m.slots[0].values[5]==3&&openedClock==80000000&&m.spiHz==80000000);
+ assert(m.changeSetting(0,5,-1));assert(m.slots[0].values[5]==2&&m.spiHz==40000000);
  assert(m.spiHz==40000000&&openedClock==40000000);
  m.deactivate();assert(allocations.empty()&&!busBusy);
  }
