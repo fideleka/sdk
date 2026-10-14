@@ -50,9 +50,13 @@ public:
     void err(const char* format, ...);
     void idf(const char* format, ...);
     /// Records dropped under logger contention/backpressure.
-    uint32_t droppedLogs() const { return dropped.load(); }
+    uint32_t droppedLogs() const {
+        return dropped.load();
+    }
 
 private:
+    friend int serial_idf(const char* format, va_list args);
+    int idfV(const char* format, va_list args);
     // Doing all work in a separate task
     void run();
     // Some fun

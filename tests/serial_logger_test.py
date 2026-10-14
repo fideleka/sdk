@@ -8,6 +8,7 @@ s = (src/'serial.cpp').read_text()
 cls = h[h.index('class SerialInterface {'):h.index('\n};', h.index('class SerialInterface {'))+3].replace('private:', 'public:')
 methods = s[s.index('void SerialInterface::enqueue'):s.index('void SerialInterface::writeGreetingMessage')]
 methods += s[s.index('void SerialInterface::drainOnce'):s.index('void SerialInterface::run()')]
+methods += 'SerialInterface serial;\n' + s[s.index('int serial_idf('):s.index('SerialInterface::SerialInterface()')]
 prefix = r'''
 #include <string>
 #include <queue>
@@ -42,6 +43,7 @@ struct Output {
 '''
 body = r'''
 SerialInterface::SerialInterface() {}
+int callIdf(const char*fmt,...){va_list args;va_start(args,fmt);int n=serial_idf(fmt,args);va_end(args);return n;}
 int main(){
  SerialInterface logger;
  logger.log("%s", "literal %s %n 100%");
@@ -61,12 +63,16 @@ int main(){
  std::thread b([&]{for(int i=0;i<1000;++i)logger.idf("B:%d",i);});a.join();b.join();
  assert(logger.serialQueue.size()<=16);for(int i=0;i<100;++i)logger.drainOnce();
  logger.log("%s",std::string(2000,'x').c_str());logger.drainOnce();
+ Serial.text.clear();
+ assert(callIdf("value %s %u","100% %s %n",42)==int(std::string("value 100% %s %n 42").size()));
+ serial.drainOnce();assert(Serial.text.find("value 100% %s %n 42")!=std::string::npos);
  delete logger.serialMutex;
+ delete serial.serialMutex;
  puts("Production logger zero-capacity/short/zero-write/queue-cap/contention/concurrent/literal/truncation PASS");
 }
 '''
 assert 'Serial.flush()' not in s
-assert 'serial.idf("%s", buffer)' in s and 'serial.log("%s", str.c_str())' in s
+assert 'return serial.idfV(format, args);' in s and 'serial.log("%s", str.c_str())' in s
 assert 'msgbuffer' not in s
 with tempfile.TemporaryDirectory(prefix='sdk-serial-host-') as td:
  p=Path(td);(p/'test.cpp').write_text(prefix+cls+methods+body)

@@ -17,3 +17,7 @@ unprepared graphics instance. `--source /path/to/old/display_graphics_routing.cp
 --sanitized-only` permits checking the negative control without editing source.
 
 These tests do not prove panel timing, SPI transfer behavior or device playback.
+
+- `python3 tests/display_routing/memory.py` fault-injects the production Canvas
+  placement constructor: 16-byte aligned PSRAM-only allocation, zero-size and
+  failed allocations, no internal fallback, and unchanged opt-in default policy.
