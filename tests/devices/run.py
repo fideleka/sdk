@@ -51,8 +51,10 @@ inline void* heap_caps_malloc(size_t n,int caps){if(n>=134400 && ++frameAllocati
 inline void* heap_caps_calloc(size_t n,size_t s,int caps){void*p=heap_caps_malloc(n*s,caps);if(p)std::memset(p,0,n*s);return p;}
 inline void heap_caps_free(void*p){if(!p)return;assert(allocations.erase(p));std::free(p);}
 inline void* heap_caps_realloc(void*p,size_t n,int caps){if(!p)return heap_caps_malloc(n,caps);assert(allocations.erase(p));p=std::realloc(p,n);if(p)allocations[p]=n;return p;}
-inline size_t heap_caps_get_free_size(int){return 1000000;}
-inline size_t heap_caps_get_largest_free_block(int){return 1000000;}
+inline size_t internalFree=1000000, largestExec=1000000;
+inline unsigned relocationAttempts=0;
+inline size_t heap_caps_get_free_size(int){return internalFree;}
+inline size_t heap_caps_get_largest_free_block(int caps){return caps==MALLOC_CAP_EXEC?largestExec:1000000;}
 inline size_t heap_caps_get_minimum_free_size(int){return 1000000;}
 inline size_t uxTaskGetStackHighWaterMark(void*){return 5000;}
 inline uint32_t millis(){return fakeTime;}
@@ -162,7 +164,7 @@ using namespace lilka;
 #include <fstream>
 extern "C" int kd_driver_entry(int,char**);
 int lilka_elf_init(lilka_elf_t*){return 0;}
-int lilka_elf_relocate(lilka_elf_t*,const uint8_t*,size_t){return -1;}
+int lilka_elf_relocate(lilka_elf_t*,const uint8_t*,size_t){++relocationAttempts;return -1;}
 int lilka_elf_run(lilka_elf_t*,int,char**){return -1;}
 void lilka_elf_deinit(lilka_elf_t*){}
 static void registered(DeviceManager&m,unsigned i){
@@ -180,6 +182,17 @@ int main(int argc,char**argv){
  assert(argc==2);
  std::ifstream f(argv[1],std::ios::binary);std::vector<uint8_t>elf((std::istreambuf_iterator<char>(f)),{});
  assert(validateDriverElf(elf.data(),elf.size()));
+ size_t codeBytes=123;
+ assert(validateDriverElf(elf.data(),elf.size(),&codeBytes));assert(codeBytes>0&&codeBytes<8192&&codeBytes%4==0);
+ // A small valid module must reach the checked allocator with Doom-sized free
+ // RAM, even below the old 32 KiB aggregate and 8 KiB executable cutoffs.
+ {DeviceManager m;internalFree=19212;largestExec=codeBytes;
+  assert(!m.load(m.slots[0],argv[1]));assert(relocationAttempts==1);assert(allocations.empty());
+  largestExec=codeBytes-1;assert(!m.load(m.slots[0],argv[1]));assert(relocationAttempts==1);
+  assert(strstr(m.slots[0].status,"Insufficient executable RAM"));assert(allocations.empty());
+  internalFree=largestExec=1000000;}
+ codeBytes=123;assert(!validateDriverElf(elf.data(),1,&codeBytes));assert(codeBytes==0);
+
  for(size_t i=0;i<sizeof(lilka_elf32_hdr_t);++i)assert(!validateDriverElf(elf.data(),i));
  auto corrupt=elf;corrupt[32]=0xff;corrupt[33]=0xff;assert(!validateDriverElf(corrupt.data(),corrupt.size()));
  corrupt=elf;corrupt[18]=0;assert(!validateDriverElf(corrupt.data(),corrupt.size()));
