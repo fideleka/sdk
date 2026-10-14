@@ -127,13 +127,24 @@ bool DeviceManager::begin(bool skip) {
     if (worker) return true;
     if (!mutex || !internalMutex || !frameMutex) return false;
     discover(skip);
-    if (!hasRegisteredDriver()) return true;
+    for (unsigned i = 0; i < deviceCount; ++i)
+        serial.log("display-device: %s: %s", slots[i].name, slots[i].status);
+    if (!hasRegisteredDriver()) {
+        serial.log("display-device: no registered display driver; internal fallback");
+        return true;
+    }
     if (xTaskCreate(workerEntry, "display-devices", 6144, this, 1, &worker) != pdPASS) {
         workerReady = false;
+        serial.err(
+            "display-device: worker allocation failed: requested=6144 internal-free=%u largest=%u",
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT))
+        );
         deactivate();
         return false;
     }
     workerReady = true;
+    serial.log("display-device: worker ready, selected mode=%u", static_cast<unsigned>(mode.load()));
     return true;
 }
 void DeviceManager::workerEntry(void* context) {
@@ -267,12 +278,23 @@ bool DeviceManager::load(Slot& slot, const char* path) {
     auto* bytes = length > 0 && length <= 65536
                       ? static_cast<uint8_t*>(heap_caps_malloc(length, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT))
                       : nullptr;
-    bool valid =
-        bytes && fread(bytes, 1, length, file) == static_cast<size_t>(length) && validateDriverElf(bytes, length);
+    size_t codeBytes = 0;
+    bool valid = bytes && fread(bytes, 1, length, file) == static_cast<size_t>(length) &&
+                 validateDriverElf(bytes, length, &codeBytes);
     fclose(file);
-    if (valid && (heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 32768 ||
-                  heap_caps_get_largest_free_block(MALLOC_CAP_EXEC) < 8192))
+    // Check the validated module's actual contiguous executable allocation, not
+    // a fixed free-heap watermark. Applications may already own their stacks.
+    // SPI buffers and the worker retain checked allocation/rollback paths below.
+    if (valid && heap_caps_get_largest_free_block(MALLOC_CAP_EXEC) < codeBytes) {
+        strlcpy(slot.status, "Insufficient executable RAM", sizeof(slot.status));
+        serial.err(
+            "display-device: code allocation unavailable: requested=%u largest-exec=%u internal-free=%u",
+            static_cast<unsigned>(codeBytes),
+            static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_EXEC)),
+            static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT))
+        );
         valid = false;
+    }
     if (valid) valid = lilka_elf_relocate(&slot.elf, bytes, length) == 0;
     heap_caps_free(bytes); // ELF no longer needed; do not retain a second copy.
     const uintptr_t code = reinterpret_cast<uintptr_t>(slot.elf.ptext);

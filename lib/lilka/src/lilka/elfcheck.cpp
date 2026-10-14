@@ -33,7 +33,8 @@ bool mapped(const Section* sections, int count, uint64_t loaded, uint32_t addres
     return false;
 }
 } // namespace
-bool validateDriverElf(const uint8_t* bytes, size_t size) {
+bool validateDriverElf(const uint8_t* bytes, size_t size, size_t* codeBytes) {
+    if (codeBytes) *codeBytes = 0;
     if (!bytes || size < sizeof(Header) || size > 65536) return false;
     Header h;
     memcpy(&h, bytes, sizeof(h));
@@ -136,5 +137,6 @@ bool validateDriverElf(const uint8_t* bytes, size_t size) {
             }
         }
     }
+    if (codeBytes) *codeBytes = (code + 3u) & ~size_t(3);
     return true;
 }
