@@ -63,7 +63,7 @@ def build_drivers(toolchain, output):
             shutil.copy2(manifest_path, destination / 'manifest.json')
             results.append({'package': package.name, 'abi': ABI, 'type': metadata['type'],
                             'device_uuid': metadata['device_uuid'], 'files': {
-                                str(path.relative_to(output)): hashlib.sha256(path.read_bytes()).hexdigest()
+                                path.relative_to(output).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
                                 for path in (destination / 'driver.so', destination / 'manifest.json')}})
     if not results:
         raise RuntimeError('No driver sources/manifests found in selected Keira branch')
