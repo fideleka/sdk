@@ -89,6 +89,14 @@ typedef ButtonState _StateButtons[Button::COUNT];
 ///     }
 /// }
 /// @endcode
+#if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
+struct InputMeasurements {
+    uint32_t scans = 0, gapMaxUs = 0, workMaxUs = 0;
+    uint64_t gapTotalUs = 0, workTotalUs = 0;
+    uint32_t gaps = 0;
+};
+#endif
+
 class Controller {
 public:
     Controller();
@@ -97,6 +105,10 @@ public:
     void begin();
     /// Прочитати стан кнопок та скинути прапорці `justPressed` та `justReleased`.
     State getState();
+#if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
+    /// Profiling only: atomically take/reset scanner statistics, not button state.
+    InputMeasurements takeInputMeasurements();
+#endif
     /// Прочитати стан кнопок, не скидаючи прапорців `justPressed` та `justReleased`.
     State peekState();
     void resetState();
@@ -136,6 +148,10 @@ private:
     uint16_t wakeSuppressed = 0;
     bool systemShortcutsEnabled = true;
     State state;
+#if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
+    InputMeasurements inputMeasurements;
+    int64_t measuredScanAt = 0;
+#endif
     int8_t pins[Button::COUNT] = {
         LILKA_GPIO_UP,
         LILKA_GPIO_DOWN,
