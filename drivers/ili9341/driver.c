@@ -10,7 +10,7 @@ void* memset(void* destination, int value, size_t count) {
 
 typedef struct {
     uint16_t width, height;
-    uint8_t rotation, opened;
+    uint8_t rotation, opened, test_drawn;
 } State;
 static const char* const pin_names[] = {"GPIO12", "GPIO13", "GPIO14", "GPIO21", "GPIO47", "GPIO48"};
 static const int32_t pins[] = {12, 13, 14, 21, 47, 48};
@@ -23,6 +23,7 @@ static const uint32_t intervals[] = {67, 50, 34, 17};
 static const char* const drive_names[] = {"79Hz default", "70Hz line", "61Hz line", "79Hz frame"};
 static const char* const backlight_names[] = {"Disconnected", "GPIO47", "GPIO48"};
 static const int32_t backlight_pins[] = {-1, 47, 48};
+static const char* const test_names[] = {"Off", "Fixed image + writes", "Fixed image, hold"};
 static const kd_setting settings[] = {
     {1, "Clock pin", KD_SETTING_CHOICE, 0, 0, 5, 1, pin_names},
     {2, "MOSI pin", KD_SETTING_CHOICE, 1, 0, 5, 1, pin_names},
@@ -34,6 +35,7 @@ static const kd_setting settings[] = {
     // ID 8 belonged to the removed full-frame experiment. Never reinterpret it.
     {9, "Panel drive", KD_SETTING_CHOICE, 0, 0, 3, 1, drive_names},
     {10, "Backlight pin", KD_SETTING_CHOICE, 0, 0, 2, 1, backlight_names},
+    {11, "SPI test", KD_SETTING_CHOICE, 0, 0, 2, 1, test_names},
 };
 static int command(const kd_host* host, uint8_t code, const uint8_t* bytes, uint32_t count) {
     if (host->spi_write(host->context, 0, &code, 1)) return -1;
@@ -120,6 +122,23 @@ static uint32_t interval(const void* api, void* memory) {
     const kd_host* host = api;
     return intervals[host->setting(host->context, 7)];
 }
+static int test_image(const kd_host* host, State* state, unsigned width, unsigned height) {
+    // A bounded row buffer, no retained frame/allocation. Identical physical
+    // pixels in both test modes; never blank between repeated writes.
+    uint16_t row[320];
+    static const uint16_t colors[] = {0x0000, 0xffff, 0x8410, 0xfd20, 0xf800, 0x07e0, 0x001f, 0x4208};
+    if (window(host, 0, 0, width, height)) return -1;
+    for (unsigned y = 0; y < height; ++y) {
+        for (unsigned x = 0; x < width; ++x) {
+            if (y < height / 2) row[x] = colors[x * 8 / width];
+            else if (x < width / 2) row[x] = ((x / 8 + y / 8) & 1) ? 0x8410 : 0x4208;
+            else row[x] = (y & 1) ? 0x8410 : 0x4208;
+        }
+        if (host->spi_pixels(host->context, row, width)) return -1;
+    }
+    state->test_drawn = 1;
+    return 0;
+}
 static int present_rows(
     const void* api, void* memory, const uint16_t* pixels, uint16_t width, uint16_t height, uint16_t first_row,
     uint16_t row_count
@@ -131,6 +150,10 @@ static int present_rows(
     if (!state->opened || !pixels || !width || !height || width > panel_width || height > panel_height ||
         first_row >= height || !row_count || row_count > height - first_row)
         return -1;
+    const int test = host->setting(host->context, 11);
+    // Settings changes reactivate with zeroed state. Once held, even incoming
+    // orientation/geometry changes must not issue commands or pixel transfers.
+    if (test == 2 && state->test_drawn) return 0;
     if (state->width != width || state->height != height || state->rotation != rotation) {
         static const uint8_t madctl[] = {0x48, 0x28, 0x88, 0xe8};
         if (command(host, 0x36, madctl + rotation, 1) || window(host, 0, 0, panel_width, panel_height)) return -1;
@@ -148,6 +171,7 @@ static int present_rows(
         state->height = height;
         state->rotation = rotation;
     }
+    if (test) return test_image(host, state, panel_width, panel_height);
     if (window(host, (panel_width - width) / 2, (panel_height - height) / 2 + first_row, width, row_count)) return -1;
     return host->spi_pixels(host->context, pixels + (uint32_t)first_row * width, (uint32_t)width * row_count);
 }
@@ -167,7 +191,7 @@ static const kd_device descriptor = {
     "cfa4bc25-c2d6-4a18-ade9-16506b19acf1",
     "674db8e0-cd55-4bfb-90b0-1e521e97c1cd",
     "ILI9341 display",
-    "1.1.6",
+    "1.1.7",
     1,
     sizeof(settings) / sizeof(settings[0]),
     settings,
