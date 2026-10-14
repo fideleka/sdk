@@ -1,3 +1,6 @@
+#if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
+#    include <esp_timer.h>
+#endif
 #include <Arduino.h>
 
 #include <driver/uart.h>
@@ -120,6 +123,9 @@ int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
 
 void Controller::inputTask() {
     while (1) {
+#if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
+        const int64_t scanAt = esp_timer_get_time();
+#endif
         uint16_t rawPressed = 0;
         for (int i = 0; i < Button::ANY; ++i) {
             if (pins[i] >= 0 && !digitalRead(pins[i])) rawPressed |= 1 << i;
@@ -129,9 +135,35 @@ void Controller::inputTask() {
         // on the audio settings task, never in this scan or an application callback.
         if (volumeDelta) audio.stepVolumeShortcut(volumeDelta);
         if (brightnessSteps) brightness.stepBrightnessShortcut(brightnessSteps);
+#if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
+        const uint32_t workUs = esp_timer_get_time() - scanAt;
+        {
+            AcquireController acquire(semaphore);
+            auto& metrics = inputMeasurements;
+            ++metrics.scans;
+            metrics.workTotalUs += workUs;
+            if (workUs > metrics.workMaxUs) metrics.workMaxUs = workUs;
+            if (measuredScanAt) {
+                const uint32_t gap = scanAt - measuredScanAt;
+                ++metrics.gaps;
+                metrics.gapTotalUs += gap;
+                if (gap > metrics.gapMaxUs) metrics.gapMaxUs = gap;
+            }
+            measuredScanAt = scanAt;
+        }
+#endif
         vTaskDelay(5 / portTICK_PERIOD_MS);
     }
 }
+
+#if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
+InputMeasurements Controller::takeInputMeasurements() {
+    AcquireController acquire(semaphore);
+    const auto result = inputMeasurements;
+    inputMeasurements = InputMeasurements{};
+    return result;
+}
+#endif
 
 void Controller::setSystemShortcutsEnabled(bool enabled) {
     AcquireController acquire(semaphore);
