@@ -90,6 +90,9 @@ void Display::publishRouting() {
         const uint32_t now = millis();
         if (light.visible(now) && (!overlay.visible(now) || now - light.adjustedAt < now - overlay.adjustedAt))
             overlay = light;
+        const auto selection = devices.getOverlay();
+        if (selection.visible(now) && (!overlay.visible(now) || now - selection.adjustedAt < now - overlay.adjustedAt))
+            overlay = selection;
         if (devices.capture(nullptr, routedCanvas, overlay, displaySettings.isSleeping())) routingDirty = false;
     }
 }

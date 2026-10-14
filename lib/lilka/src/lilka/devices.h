@@ -63,6 +63,8 @@ public:
         return mode.load();
     }
     bool setDisplayMode(Mode value);
+    /// Successful mode-switch feedback; short frame lock, never waits for SPI.
+    VolumeOverlaySnapshot getOverlay();
     bool externalOutput() const {
         return workerReady.load() && routed.load();
     }
@@ -109,6 +111,7 @@ private:
     size_t frameCapacity = 0;
     uint16_t width = 0, height = 0;
     bool pending = false, bootSkipped = false, frameValid = false;
+    VolumeOverlaySnapshot modeFeedback; // guarded by frameMutex
     // Bit set means this buffer row is stale relative to the current frame.
     uint32_t staleRows[2][10] = {};
     uint32_t dirtyRows[10] = {}, internalDirtyRows[10] = {};

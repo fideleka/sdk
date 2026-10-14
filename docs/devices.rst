@@ -129,6 +129,27 @@ it. Existing device records restore the new field to Off when absent. Existing
 ABI-1 firmware accepts this SD-driver-only addition; install the matching
 ``driver.so`` and ``manifest.json`` package and restart to discover the field.
 
+Driver UI and feedback (1.1.8)
+-----------------------------
+
+Keira localizes built-in setting labels and choices in English/Ukrainian, keeping
+GPIO names and unknown third-party text unchanged. Backlight pin is grouped with
+Clock/MOSI/Reset/DC and has no optional/test suffix.
+
+SPI choices are 10, 20, 40 and 80 MHz. Speed now uses setting ID 12 so old index
+3 cannot silently turn 50 MHz into 80 MHz. With the matching SDK, old setting ID
+5 migrates 10/20/40/80 unchanged and removed 50/60/70 choices down to 40 MHz.
+Pins, orientation, frame limit, panel drive and test selection retain their IDs.
+Install matching firmware and both SD package files, then restart. Older firmware
+without this migration treats the new speed field as its default 20 MHz.
+
+A successful display-mode change produces 1.2 seconds of feedback using the same
+RAM-only renderer as brightness/volume. Internal/External/Both text and two monitor
+icons show the selected route. The newest feedback wins; failed/no-op changes do
+not renew the timeout. Keira composes one localized snapshot for both outputs;
+app canvases and screenshots remain untouched. Standalone SDK text defaults to
+English. Diagnostic hold mode deliberately suppresses these external frame writes.
+
 Verification boundary
 ---------------------
 

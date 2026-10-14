@@ -388,12 +388,20 @@ bool DeviceManager::restore(Slot& slot) {
             }
             slot.enabled = r.enabled;
             for (unsigned f = 0; slot.descriptor && f < slot.descriptor->setting_count; ++f)
-                for (unsigned j = 0; j < r.count; ++j)
-                    if (slot.descriptor->settings[f].id == r.fields[j].id) {
-                        const auto& definition = slot.descriptor->settings[f];
-                        if (r.fields[j].value >= definition.minimum && r.fields[j].value <= definition.maximum)
-                            slot.values[f] = r.fields[j].value;
+                for (unsigned j = 0; j < r.count; ++j) {
+                    const auto& definition = slot.descriptor->settings[f];
+                    int32_t value = r.fields[j].value;
+                    bool matches = definition.id == r.fields[j].id;
+                    // ILI9341 1.1.8 removes 50/60/70 MHz. Preserve 10/20/40/80;
+                    // removed speeds migrate conservatively to 40, never upward.
+                    if (definition.id == 12 && r.fields[j].id == 5 && value >= 0 && value <= 6 &&
+                        !strcmp(slot.driverUuid, "cfa4bc25-c2d6-4a18-ade9-16506b19acf1") &&
+                        !strcmp(slot.uuid, "674db8e0-cd55-4bfb-90b0-1e521e97c1cd")) {
+                        value = value == 6 ? 3 : (value > 2 ? 2 : value);
+                        matches = true;
                     }
+                    if (matches && value >= definition.minimum && value <= definition.maximum) slot.values[f] = value;
+                }
             break;
         }
         prefs.end();
@@ -730,6 +738,15 @@ bool DeviceManager::setDisplayMode(Mode value) {
     if (!good) {
         mode = previous;
         route();
+    }
+    if (good && value != previous) {
+        xSemaphoreTake(frameMutex, portMAX_DELAY);
+        modeFeedback.valid = true;
+        modeFeedback.adjustedAt = millis();
+        modeFeedback.displayMode = value;
+        const char* names[] = {"Internal", "External", "Both"};
+        strlcpy(modeFeedback.muteLabel, names[value], sizeof(modeFeedback.muteLabel));
+        xSemaphoreGive(frameMutex);
     }
     xSemaphoreGive(mutex);
     return good;
@@ -1191,3 +1208,13 @@ bool DeviceManager::presentInternal() {
 DeviceManager devices;
 } // namespace lilka
 #endif
+
+namespace lilka {
+VolumeOverlaySnapshot DeviceManager::getOverlay() {
+    if (!frameMutex) return {};
+    xSemaphoreTake(frameMutex, portMAX_DELAY);
+    const auto result = modeFeedback;
+    xSemaphoreGive(frameMutex);
+    return result;
+}
+} // namespace lilka

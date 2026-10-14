@@ -34,6 +34,7 @@ public:
     void draw16bitRGBBitmap(int x,int y,const uint16_t*p,int rw,int rh){for(int yy=0;yy<rh;++yy)for(int xx=0;xx<rw;++xx)drawPixel(x+xx,y+yy,p[yy*rw+xx]);}
 };
 struct MockDevices {
+    VolumeOverlaySnapshot getOverlay(){return {};}
     bool registered=false,internal=true,external=false,sleeping=false;
     uint32_t generation=1;unsigned captures=0;
     std::vector<uint16_t> published;
