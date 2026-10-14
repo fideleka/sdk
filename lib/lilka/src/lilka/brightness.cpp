@@ -11,6 +11,8 @@
 #    include <Preferences.h>
 #    include <Arduino.h>
 #    include <atomic>
+#    include <esp_rom_gpio.h>
+#    include <soc/gpio_sig_map.h>
 
 namespace lilka {
 namespace {
@@ -23,6 +25,8 @@ SemaphoreHandle_t hardwareMutex = nullptr;
 portMUX_TYPE snapshotMux = portMUX_INITIALIZER_UNLOCKED;
 VolumeOverlaySnapshot feedback;
 bool sleeping = false;
+bool nativeActive = true, externalActive = false;
+std::atomic<int> externalPin{-1};
 uint32_t revision = 0, changedAt = 0, savedRevision = 0, retryAt = 0;
 bool saveFailed = false;
 
@@ -30,10 +34,21 @@ int clamp(int64_t value) {
     return value < 5 ? 5 : (value > 100 ? 100 : static_cast<int>(value));
 }
 
+uint32_t brightnessDuty(int level) {
+    return level == 100 ? 256 : (level * 255 + 50) / 100;
+}
+
 bool apply(int level) {
-    // The exact full-on value is 256, not 255, for an 8-bit LEDC timer.
-    const uint32_t duty = level == 100 ? 256 : (level * 255 + 50) / 100;
-    return ledc_set_duty(mode, channel, duty) == ESP_OK && ledc_update_duty(mode, channel) == ESP_OK;
+    const bool nativeOk = ledc_set_duty(mode, channel, nativeActive ? brightnessDuty(level) : 0) == ESP_OK &&
+                          ledc_update_duty(mode, channel) == ESP_OK;
+    const bool externalOk =
+        externalPin < 0 || (ledc_set_duty(mode, LEDC_CHANNEL_6, externalActive ? brightnessDuty(level) : 0) == ESP_OK &&
+                            ledc_update_duty(mode, LEDC_CHANNEL_6) == ESP_OK);
+    return nativeOk && externalOk;
+}
+
+int effectiveLevel() {
+    return sleeping ? 0 : (idleDimmed.load() ? 5 : requested.load());
 }
 
 bool update(int value, bool relative, bool showFeedback) {
@@ -41,6 +56,7 @@ bool update(int value, bool relative, bool showFeedback) {
     xSemaphoreTake(hardwareMutex, portMAX_DELAY);
     const int next = clamp(relative ? static_cast<int64_t>(requested.load()) + value : value);
     if (!sleeping && !apply(next)) {
+        apply(effectiveLevel());
         xSemaphoreGive(hardwareMutex);
         return false;
     }
@@ -122,6 +138,71 @@ bool Brightness::isEnabled() {
 }
 bool Brightness::isPWMChannelReserved(int value) {
     return enabled.load() && (value == 6 || value == 7);
+}
+bool Brightness::attachExternalBacklight(int pin) {
+    if (!enabled.load()) return false;
+    bool allowed = false;
+    for (auto candidate : LILKA_EXT_PINS)
+        if (pin == candidate) allowed = true;
+    if (!allowed) return false;
+    xSemaphoreTake(hardwareMutex, portMAX_DELAY);
+    if (externalPin >= 0) {
+        xSemaphoreGive(hardwareMutex);
+        return false;
+    }
+    // Never use ledc_channel_config here: it configures a push-pull pad.
+    // Initialize the existing timer's second channel, then route its signal
+    // to an explicitly released open-drain pad without driving HIGH.
+    const auto gpio = static_cast<gpio_num_t>(pin);
+    bool ok = ledc_bind_channel_timer(mode, LEDC_CHANNEL_6, LEDC_TIMER_3) == ESP_OK &&
+              ledc_set_duty_with_hpoint(mode, LEDC_CHANNEL_6, brightnessDuty(effectiveLevel()), 0) == ESP_OK &&
+              ledc_update_duty(mode, LEDC_CHANNEL_6) == ESP_OK;
+    ok = ok && gpio_reset_pin(gpio) == ESP_OK && gpio_set_pull_mode(gpio, GPIO_FLOATING) == ESP_OK &&
+         gpio_set_level(gpio, 1) == ESP_OK && gpio_set_direction(gpio, GPIO_MODE_OUTPUT_OD) == ESP_OK;
+    if (ok) {
+        esp_rom_gpio_connect_out_signal(pin, LEDC_LS_SIG_OUT0_IDX + LEDC_CHANNEL_6, false, false);
+        externalPin = pin;
+        externalActive = true;
+    } else {
+        ledc_stop(mode, LEDC_CHANNEL_6, 1);
+        gpio_reset_pin(gpio);
+        gpio_set_pull_mode(gpio, GPIO_FLOATING);
+    }
+    xSemaphoreGive(hardwareMutex);
+    return ok;
+}
+
+void Brightness::detachExternalBacklight() {
+    if (!enabled.load()) return;
+    xSemaphoreTake(hardwareMutex, portMAX_DELAY);
+    if (externalPin >= 0) {
+        ledc_stop(mode, LEDC_CHANNEL_6, 1);
+        gpio_reset_pin(static_cast<gpio_num_t>(externalPin.load()));
+        gpio_set_pull_mode(static_cast<gpio_num_t>(externalPin.load()), GPIO_FLOATING);
+        externalPin = -1;
+        externalActive = false;
+    }
+    xSemaphoreGive(hardwareMutex);
+}
+
+bool Brightness::setActiveDisplays(bool native, bool external) {
+    if (!enabled.load()) return false;
+    xSemaphoreTake(hardwareMutex, portMAX_DELAY);
+    const bool oldNative = nativeActive, oldExternal = externalActive;
+    nativeActive = native;
+    externalActive = external;
+    const bool ok = apply(effectiveLevel());
+    if (!ok) {
+        nativeActive = oldNative;
+        externalActive = oldExternal;
+        apply(effectiveLevel());
+    }
+    xSemaphoreGive(hardwareMutex);
+    return ok;
+}
+
+bool Brightness::isPinReserved(int pin) {
+    return enabled.load() && (pin == LILKA_SLEEP || (externalPin.load() >= 0 && pin == externalPin.load()));
 }
 int Brightness::getBrightness() {
     return enabled.load() ? requested.load() : 100;
@@ -223,6 +304,17 @@ bool Brightness::isEnabled() {
     return false;
 }
 bool Brightness::isPWMChannelReserved(int) {
+    return false;
+}
+bool Brightness::attachExternalBacklight(int) {
+    return false;
+}
+void Brightness::detachExternalBacklight() {
+}
+bool Brightness::setActiveDisplays(bool, bool) {
+    return false;
+}
+bool Brightness::isPinReserved(int) {
     return false;
 }
 int Brightness::getBrightness() {
