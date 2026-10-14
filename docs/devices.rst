@@ -90,6 +90,45 @@ LCD scanout can be off/black. Firmware cannot guarantee darkness during the
 power-on/reset interval before GPIO ownership; that needs appropriate hardware
 biasing. Disabled/unknown modules are never touched merely to blank a screen.
 
+ILI9341 fixed-image SPI diagnostic (1.1.7)
+----------------------------------------
+
+In Keira, use Settings -> Devices -> ILI9341 -> **SPI test**:
+
+* **Off** (default): normal application frames and partial updates.
+* **Fixed image + writes**: each pending application update rewrites the same
+  full-panel color bars, gray checkerboard and alternating gray lines. This is
+  a deliberate transfer stress test, not a normal refresh/performance mode.
+* **Fixed image, hold**: draw that identical pattern once, then acknowledge
+  subsequent application frames without sending SPI commands or pixels, even
+  if source geometry changes. Panel scanout and BLK stay controlled normally.
+
+Use **Both** mode so the internal display remains interactive. Set brightness
+100%, idle dim Never and auto-off Never before comparing. Leave panel drive,
+SPI speed, wiring and other settings unchanged. In the write mode, move the
+cursor repeatedly on the internal screen to generate changed frames; a static
+application otherwise need not produce any transfers. In hold mode repeat the
+same cursor movements, then leave the unit untouched for 20-30 seconds. Judge
+with your eyes; camera aliasing cannot measure the true shimmer frequency.
+
+Settings changes reset/reinitialize the panel, so disregard that brief transition.
+Do not switch output mode, change device settings, sleep/wake or restart during
+an observation: those operations legitimately send initialization/power commands.
+Hold suppresses this driver's frame writes, not every other bus or CPU activity.
+It does not turn off the controller, detach SPI pins or disconnect power.
+
+Shimmer surviving hold excludes ongoing frame transfers as a necessary cause;
+it favors panel drive, backlight/power or another interference source, without
+proving which. Shimmer disappearing only in hold implicates transfer activity,
+including scan interaction or transfer-induced electrical noise, not necessarily
+framebuffer correctness. Different pattern regions may show different behavior.
+
+The test selection is saved like other device settings. Return **SPI test** to
+**Off** after testing (on the internal screen); restarting alone does not clear
+it. Existing device records restore the new field to Off when absent. Existing
+ABI-1 firmware accepts this SD-driver-only addition; install the matching
+``driver.so`` and ``manifest.json`` package and restart to discover the field.
+
 Verification boundary
 ---------------------
 

@@ -260,7 +260,7 @@ int main(int argc,char**argv){
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
  assert(m.transferPixels-pixelsBefore==280&&m.rowTransfers==rowsBefore+1&&m.frame[40*280+20]==0xabcd);
  // Even an installed 1.1.2 descriptor requesting full flush is ignored.
- assert(m.slots[0].descriptor->setting_count==9&&m.slots[0].descriptor->settings[7].id==9);
+ assert(m.slots[0].descriptor->setting_count==10&&m.slots[0].descriptor->settings[7].id==9);
  const auto*rowCurrent=m.slots[0].descriptor;kd_device retired=*rowCurrent;
  retired.size=offsetof(kd_device,backlight_pin);retired.prefer_full_frame=[](const void*,void*)->uint32_t{assert(false);return 1;};
  m.slots[0].descriptor=&retired;
@@ -397,7 +397,7 @@ int main(int argc,char**argv){
  assert(m.setEnabled(0,true));assert(m.spiHz==40000000);
  // Backlight field preserves pin/SPI settings from a real old 8-field blob.
  for(auto& entry:nvm){if(entry.second.size()==sizeof(Record)){Record saved;std::memcpy(&saved,entry.second.data(),sizeof saved);saved.count=8;std::memcpy(entry.second.data(),&saved,sizeof saved);entry.second.resize(offsetof(Record,fields)+8*sizeof(Record::Field));}}
- assert(m.restore(m.slots[0])&&m.slots[0].values[4]==2&&m.slots[0].values[8]==0);
+ assert(m.restore(m.slots[0])&&m.slots[0].values[4]==2&&m.slots[0].values[8]==0&&m.slots[0].values[9]==0);
  assert(m.persist(m.slots[0]));
  // Conflicting backlight pins must roll back without changing native brightness.
  m.slots[0].values[0]=4;assert(m.activate(0)); // SPI clock temporarily uses GPIO47.
@@ -451,13 +451,63 @@ int main(int argc,char**argv){
  assert(m.displayMode()==DeviceManager::Internal&&m.cycleRequests==0);
  m.deactivate();assert(allocations.empty());
  }
+
+ // Diagnostic output must be physically identical with and without traffic.
+ nvm.clear();
+ {
+ DeviceManager m;registered(m,0);assert(m.setEnabled(0,true));
+ assert(m.setDisplayMode(DeviceManager::Both));
+ assert(m.slots[0].descriptor->settings[9].id==11&&m.slots[0].values[9]==0);
+ assert(m.changeSetting(0,9,1)); // fixed image + writes
+ lilka::Canvas app(0,0,280,240);lilka::VolumeOverlaySnapshot overlay;
+ auto tick=[&]{fakeTime+=100;stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;};
+ auto image=[] {
+  std::vector<uint8_t> result;bool writing=false;
+  for(const auto&chunk:wireChunks){
+   if(chunk.first==0){writing=chunk.second.size()==1&&chunk.second[0]==0x2c;if(writing)result.clear();}
+   else if(writing)result.insert(result.end(),chunk.second.begin(),chunk.second.end());
+  }
+  return result;
+ };
+ wireChunks.clear();assert(m.capture(nullptr,&app,overlay,false));tick();
+ const auto pattern=image();assert(pattern.size()==320*240*2);
+ // Top color bars and lower checker/line areas are genuinely different.
+ assert(pattern[0]==0&&pattern[1]==0&&pattern[80]==255&&pattern[81]==255);
+ assert(pattern[120*320*2]!=pattern[120*320*2+16]);
+ for(int i=0;i<3;++i){
+  app.getFramebuffer()[0]^=1;assert(m.capture(nullptr,&app,overlay,false));
+  const auto before=starts;wireChunks.clear();tick();assert(starts>before&&image()==pattern);
+ }
+ assert(m.changeSetting(0,9,1)); // hold: setting reactivation clears state
+ // A failed initial pattern must not latch hold and silently keep partial GRAM.
+ auto failing=m.slots[0].host;
+ failing.spi_pixels=[](void*,const uint16_t*,uint32_t)->int32_t{return -1;};
+ assert(m.slots[0].descriptor->present(&failing,m.slots[0].state,app.getFramebuffer(),280,240));
+ wireChunks.clear();assert(m.capture(nullptr,&app,overlay,false));tick();assert(image()==pattern);
+ const auto held=starts;wireChunks.clear();
+ for(int i=0;i<20;++i){
+  app.getFramebuffer()[i]^=1;overlay.valid=(i&1);
+  assert(m.capture(nullptr,&app,overlay,false));tick();
+  assert(starts==held&&wireChunks.empty()&&m.active==0&&m.externalOutput());
+ }
+ // No orientation commands/clear even if the producer geometry changes.
+ auto& slot=m.slots[0];
+ assert(!slot.descriptor->present(&slot.host,slot.state,app.getFramebuffer(),240,280));
+ assert(starts==held&&wireChunks.empty());
+ // Sleep/reroute are deliberately NOT blocked: normal power control survives.
+ m.setSleeping(true);assert(starts>held&&wireChunks.back().first==0&&wireChunks.back().second==std::vector<uint8_t>{0x28});
+ m.setSleeping(false);assert(wireChunks.back().first==0&&wireChunks.back().second==std::vector<uint8_t>{0x29});
+ assert(m.changeSetting(0,9,1));assert(slot.values[9]==0); // wrap back to normal
+ wireChunks.clear();assert(m.capture(nullptr,&app,overlay,false));tick();assert(!wireChunks.empty());
+ m.deactivate();assert(allocations.empty());
+ }
  // Restore the selected route, but Select-held recovery forces Internal.
  nvm.clear();nvm["displayMode"]={DeviceManager::Both};
  {DeviceManager m;registered(m,0);assert(m.begin(false));assert(m.displayMode()==DeviceManager::Both);assert(m.begin(false));}
  {DeviceManager m;assert(m.begin(true));assert(m.displayMode()==DeviceManager::Internal);}
  nvm["displayMode"]={255};
  {DeviceManager m;assert(m.begin(false));assert(m.displayMode()==DeviceManager::Internal);}
- puts("PASS: shared frames/20 in-flight updates/latest-wins, 40 MHz persistence, queued DMA/quarantine, partial/full frames, legacy ABI, overlays, allocation rollback, 20 toggles and ELF bounds");
+ puts("PASS: shared frames/20 in-flight updates/latest-wins, 40 MHz persistence, queued DMA/quarantine, partial/full frames, legacy ABI, overlays, allocation rollback, 20 toggles, ELF bounds and identical fixed-pattern/zero-SPI hold diagnostic");
 }
 '''
 with tempfile.TemporaryDirectory(prefix='keira-device-host-') as tmp:
@@ -482,7 +532,7 @@ with tempfile.TemporaryDirectory(prefix='keira-device-host-') as tmp:
         p.parent.mkdir(parents=True,exist_ok=True)
         p.write_text('#pragma once\n#include "mock.h"\n')
     (tmp / 'test.cpp').write_text(harness)
-    subprocess.run(['gcc','-std=c11','-Dmain=kd_driver_entry','-Dmemset=kd_module_memset',
+    subprocess.run(['gcc','-std=c11','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Dmain=kd_driver_entry','-Dmemset=kd_module_memset',
                     '-c',str(root/'drivers/ili9341/driver.c'),'-o',str(tmp/'driver.o')],check=True)
     subprocess.run(['g++','-std=c++17','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',
                     '-I'+str(tmp),'-I'+str(tmp/'lilka'),'-I'+str(root.parent/'keira/.pio/libdeps/v2/ArduinoJson/src'),
