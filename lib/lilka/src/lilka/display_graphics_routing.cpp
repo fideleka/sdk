@@ -156,16 +156,10 @@ void Display::draw24bitRGBBitmap(int16_t x, int16_t y, uint8_t* pixels, int16_t 
 }
 void Display::drawChar(int16_t x, int16_t y, unsigned char character, uint16_t color, uint16_t background) {
     DisplayFrame completed(*this);
-    if (auto* canvas = routingCanvas()) {
-        canvas->setTextSize(textsize_x, textsize_y, text_pixel_margin);
-        canvas->drawChar(x, y, character, color, background);
-        routingDirty = true;
-    }
-    if (nativeOutput()) {
-        const bool previous = nativeBypass;
-        nativeBypass = true;
-        Arduino_ST7789::drawChar(x, y, character, color, background);
-        nativeBypass = previous;
-    }
+    // U8g2's write() prepares glyph decoder state on THIS graphics instance.
+    // Calling Canvas::drawChar directly uses its unprepared decoder pointer.
+    // Decode once here; virtual pixel/fill spans already mirror to the canvas
+    // and suppress native SPI when only the external display is active.
+    Arduino_ST7789::drawChar(x, y, character, color, background);
 }
 } // namespace lilka
