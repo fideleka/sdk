@@ -50,7 +50,7 @@ public:
                 if (direction == 3) ++result.brightnessSteps;
             }
         }
-        constexpr uint16_t displayButton = 1 << 7;
+        constexpr uint16_t displayButton = 1 << 4; // A
         if (displayEnabled && selectAdjusting && enabled && (previous & select) && (pressed & select) &&
             !(pressed & start) && (pressed & displayButton) && !(previous & displayButton)) {
             suppressed |= displayButton | select;

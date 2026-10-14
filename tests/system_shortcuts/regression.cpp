@@ -181,18 +181,25 @@ void chordTests() {
         assert(events.back() == Event(static_cast<Button>(direction), false));
     }
     detail::SystemShortcuts modes;
-    const uint16_t d = 1 << D;
+    const uint16_t displayButton = 1 << A;
     modes.scan(S, 100, true, true, false, true);
-    auto mode = modes.scan(S | d, 120, true, true, false, true);
-    assert(mode.cycleDisplay && mode.selectConsumed && (mode.suppressed & d));
-    assert(!modes.scan(S | d, 1000, true, true, false, true).cycleDisplay);
-    assert(modes.scan(S, 1020, true, true, false, true).suppressed & d);
+    auto mode = modes.scan(S | displayButton, 120, true, true, false, true);
+    assert(mode.cycleDisplay && mode.selectConsumed && (mode.suppressed & displayButton));
+    assert(!modes.scan(S | displayButton, 1000, true, true, false, true).cycleDisplay);
+    assert(modes.scan(S, 1020, true, true, false, true).suppressed & displayButton);
     modes.scan(0, 1040, true, true, false, true);
     modes.scan(S, 1060, true, true, false, true);
-    assert(!modes.scan(S | d | T, 1080, true, true, false, true).cycleDisplay);
+    assert(!modes.scan(S | displayButton | T, 1080, true, true, false, true).cycleDisplay);
+    // Existing emulator save/load and Lilplayer shuffle/repeat remain unconsumed.
+    for (auto button : {C, D}) {
+        detail::SystemShortcuts other;
+        other.scan(S, 100, true, true, false, true);
+        auto untouched = other.scan(S | (1 << button), 120, true, true, false, true);
+        assert(!untouched.cycleDisplay && !untouched.selectConsumed && !untouched.suppressed);
+    }
     detail::SystemShortcuts unavailable;
     unavailable.scan(S, 100, true);
-    assert(!unavailable.scan(S | d, 120, true).cycleDisplay);
+    assert(!unavailable.scan(S | displayButton, 120, true).cycleDisplay);
     puts("Chord arbitration, repeats, callbacks and release suppression PASS");
 }
 void ordinaryTests() {

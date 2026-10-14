@@ -173,8 +173,13 @@ void DeviceManager::delayMs(uint32_t ms) {
 void DeviceManager::discover(bool skip) {
     bootSkipped = skip;
 
-    mode = Internal; // Every firmware boots external black/off; shortcut enables it.
     Preferences prefs;
+    mode = Internal;
+    if (!skip && prefs.begin("devices", true)) {
+        const uint8_t savedMode = prefs.getUChar("displayMode", Internal);
+        if (savedMode <= Both) mode = static_cast<Mode>(savedMode);
+        prefs.end();
+    }
     DIR* directory = opendir("/sd/drivers");
     if (!directory) return;
     unsigned scanned = 0;
