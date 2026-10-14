@@ -15,6 +15,14 @@ public:
     static bool isEnabled();
     /// Arduino LEDC channels 6/7 share the reserved low-speed timer.
     static bool isPWMChannelReserved(int channel);
+    /// Native and attached external GPIO ownership for safe script wrappers.
+    static bool isPinReserved(int pin);
+    /// Attach an extension BLK input through a series resistor. Channel 6 shares
+    /// the native 20 kHz timer; HIGH is released, never driven (open drain).
+    static bool attachExternalBacklight(int pin);
+    static void detachExternalBacklight();
+    /// Route backlights without changing selected/saved brightness or overrides.
+    static bool setActiveDisplays(bool native, bool external);
     /// RAM-only brightness query, 5..100. Returns 100 when disabled.
     static int getBrightness();
     /// Clamped setter; changes hardware immediately, saves after 600 ms idle.

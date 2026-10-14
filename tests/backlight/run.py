@@ -23,6 +23,7 @@ inline void xTaskNotifyGive(TaskHandle_t){}
 #define pdMS_TO_TICKS(x) (x)
 constexpr int portMAX_DELAY=-1,pdPASS=1,ESP_OK=0;
 extern uint32_t now,stored,duty; extern int reads,writes,locks,pinHigh,fail;
+extern uint32_t externalDuty;extern int externalMode;extern bool externalRouted;
 extern bool failSave; extern void (*writeHook)();
 inline void portENTER_CRITICAL(int*) {} inline void portEXIT_CRITICAL(int*) {}
 inline uint32_t millis(){return now;}
@@ -31,18 +32,23 @@ inline void xSemaphoreTake(void*,int){++locks;}
 inline void xSemaphoreGive(void*){--locks;assert(locks==0);}
 inline void vTaskDelay(int ms){now+=ms;}
 inline int xTaskCreate(void(*)(void*),const char*,int,void*,int,void**){return fail==3?0:1;}
-using gpio_num_t=int;constexpr int GPIO_MODE_OUTPUT=1;
+using gpio_num_t=int;constexpr int GPIO_MODE_OUTPUT=1,GPIO_MODE_OUTPUT_OD=3,GPIO_FLOATING=0;
 inline int gpio_reset_pin(int){return 0;}
-inline int gpio_set_direction(int,int){return 0;}
+inline int gpio_set_pull_mode(int,int mode){assert(mode==GPIO_FLOATING);return 0;}
+inline int gpio_set_direction(int pin,int mode){if(pin==47){assert(mode==GPIO_MODE_OUTPUT_OD);externalMode=mode;}return 0;}
 inline int gpio_set_level(int,int value){pinHigh=value;return 0;}
 using ledc_mode_t=int;using ledc_channel_t=int;
-constexpr int LEDC_LOW_SPEED_MODE=0,LEDC_CHANNEL_7=7,LEDC_TIMER_3=3;
+constexpr int LEDC_LOW_SPEED_MODE=0,LEDC_CHANNEL_6=6,LEDC_CHANNEL_7=7,LEDC_TIMER_3=3;
 constexpr int LEDC_TIMER_8_BIT=8,LEDC_AUTO_CLK=0,LEDC_INTR_DISABLE=0;
 struct ledc_timer_config_t{int speed_mode,timer_num,duty_resolution,freq_hz,clk_cfg;};
 struct ledc_channel_config_t{int speed_mode,channel,timer_sel,intr_type,gpio_num;uint32_t duty;};
 inline int ledc_timer_config(const ledc_timer_config_t* p){assert(p->freq_hz==20000&&p->timer_num==3);return fail==1?-1:0;}
 inline int ledc_channel_config(const ledc_channel_config_t* p){assert(p->gpio_num==46&&p->channel==7);duty=p->duty;return fail==2?-1:0;}
-inline int ledc_set_duty(int,int,uint32_t d){if(fail==4)return -1;duty=d;return 0;}
+inline int ledc_set_duty(int,int channel,uint32_t d){if(fail==4)return -1;if(channel==6)externalDuty=d;else duty=d;return 0;}
+inline int ledc_bind_channel_timer(int,int channel,int timer){assert(channel==6&&timer==3);return fail==6?-1:0;}
+inline int ledc_set_duty_with_hpoint(int m,int c,uint32_t d,uint32_t h){assert(h==0);return ledc_set_duty(m,c,d);}
+constexpr int LEDC_LS_SIG_OUT0_IDX=73;
+inline void esp_rom_gpio_connect_out_signal(uint32_t pin,uint32_t signal,bool invert,bool oe){assert(pin==47&&signal==79&&!invert&&!oe&&externalMode==3);externalRouted=true;}
 inline int ledc_update_duty(int,int){return 0;}
 inline int ledc_stop(int,int,int level){pinHigh=level;return 0;}
 class Preferences{public:
@@ -60,6 +66,7 @@ TEST = r'''
 #include "system_shortcuts.h"
 #include <cstdio>
 uint32_t now=0,stored=37,duty=0;int reads=0,writes=0,locks=0,pinHigh=0,fail=0;
+uint32_t externalDuty=0;int externalMode=0;bool externalRouted=false;
 bool failSave=false;void(*writeHook)()=nullptr;
 int main(int argc,char** argv){
  using lilka::brightness;
@@ -94,6 +101,23 @@ int main(int argc,char** argv){
  assert(brightness.undim()&&!brightness.isDimmed()&&duty==191);
  assert(brightness.dim()&&brightness.suspend()&&duty==0&&!brightness.isDimmed());
  assert(brightness.resume()&&duty==191);
+ assert(!brightness.attachExternalBacklight(46));
+ fail=6;assert(!brightness.attachExternalBacklight(47));assert(!brightness.isPinReserved(47));fail=0;
+ assert(brightness.attachExternalBacklight(47)&&externalRouted&&externalDuty==191);
+ assert(brightness.isPinReserved(47)&&brightness.isPinReserved(46));
+ assert(!brightness.attachExternalBacklight(48));
+ assert(brightness.setActiveDisplays(true,true));
+ assert(brightness.setBrightness(50)&&duty==128&&externalDuty==128);
+ assert(brightness.setActiveDisplays(false,true)&&duty==0&&externalDuty==128);
+ assert(brightness.dim()&&duty==0&&externalDuty==13);
+ assert(brightness.suspend()&&externalDuty==0);
+ assert(brightness.setBrightness(80)&&externalDuty==0);
+ assert(brightness.resume()&&externalDuty==204&&duty==0);
+ assert(brightness.setActiveDisplays(true,false)&&duty==204&&externalDuty==0);
+ assert(brightness.setActiveDisplays(true,true)&&externalDuty==204);
+ assert(brightness.setBrightness(100)&&duty==256&&externalDuty==256);
+ brightness.detachExternalBacklight();assert(!brightness.isPinReserved(47));
+ assert(brightness.setActiveDisplays(true,false));
 #else
  assert(!brightness.begin()&&!brightness.isEnabled());
  assert(!brightness.setBrightness(0)&&brightness.getBrightness()==100&&reads==0&&writes==0);
@@ -119,7 +143,7 @@ with tempfile.TemporaryDirectory(prefix='lilka-backlight-') as directory:
         (tmp/name).write_text((SOURCE/name).read_text())
     (tmp/'mock.h').write_text(MOCK)
     (tmp/'regression.cpp').write_text(TEST)
-    for name in ('Arduino.h','Preferences.h','driver/ledc.h','driver/gpio.h','freertos/semphr.h','freertos/FreeRTOS.h','freertos/task.h'):
+    for name in ('Arduino.h','Preferences.h','driver/ledc.h','driver/gpio.h','esp_rom_gpio.h','soc/gpio_sig_map.h','freertos/semphr.h','freertos/FreeRTOS.h','freertos/task.h'):
         path=tmp/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('#pragma once\n#include "mock.h"\n')
     for version,enabled in ((2,1),(2,0),(1,1)):
         for sanitize in (False,True):
