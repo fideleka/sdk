@@ -17,13 +17,14 @@ with tempfile.TemporaryDirectory(prefix="lilka-shortcuts-") as directory:
     tmp = Path(directory)
     for name in ("controller.cpp", "controller.h", "audio.cpp", "audio.h", "config.h", "system_shortcuts.h", "volume_overlay.h", "brightness.h", "brightness.cpp", "display_settings.h", "display_settings.cpp", "settings_persistence.h", "settings_persistence.cpp"):
         (tmp / name).write_text((SOURCE / name).read_text())
-    for name in ("Arduino.h", "I2S.h", "Preferences.h", "serial.h", "driver/uart.h",
+    for name in ("Arduino.h", "I2S.h", "Preferences.h", "serial.h", "driver/uart.h", "driver/ledc.h", "driver/gpio.h", "esp_rom_gpio.h", "soc/gpio_sig_map.h",
                  "freertos/FreeRTOS.h", "freertos/semphr.h", "freertos/task.h"):
         path = tmp / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('''#pragma once
 #include "host.h"
 ''')
+    (tmp / "devices.h").write_text('#pragma once\nnamespace lilka { struct MockDevices { bool canCycleDisplays() const {return false;} void requestCycle() {} }; static MockDevices devices; }\n')
     (tmp / "board.h").write_text('''#pragma once
 namespace lilka { struct MockBoard { void enablePowerSavingMode() {} void disablePowerSavingMode() {} }; extern MockBoard board; }
 ''')

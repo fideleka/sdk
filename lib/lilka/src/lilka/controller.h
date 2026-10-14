@@ -145,6 +145,7 @@ private:
     uint32_t physicalTime[Button::ANY] = {};
     detail::SystemShortcuts shortcuts;
     int brightnessSteps = 0;
+    bool cycleDisplay = false;
     uint16_t wakeSuppressed = 0;
     bool systemShortcutsEnabled = true;
     State state;

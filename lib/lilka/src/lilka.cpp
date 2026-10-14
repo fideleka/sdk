@@ -1,5 +1,6 @@
 #include <esp_wifi.h>
 #include <esp_task_wdt.h>
+#include <driver/gpio.h>
 
 #include "lilka.h"
 
@@ -16,6 +17,9 @@ void begin() {
     config.reload(); // Must be initialized AFTER SD card: reads /sd/.lilka/config
     display.begin(); // Must be initialized AFTER SD card
     controller.begin(); // Must be initialized AFTER SD card (since SD card somehow messes with GPIO)
+    devices.begin(gpio_get_level(static_cast<gpio_num_t>(LILKA_GPIO_SELECT)) == 0);
+    display.enableRouting();
+    displaySettings.begin();
     battery.begin();
     // TODO: I2S
     // TODO: Delete Task Watchdog Timer - we'll be running long tasks

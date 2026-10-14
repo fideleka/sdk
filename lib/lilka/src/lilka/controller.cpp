@@ -1,3 +1,4 @@
+#include "devices.h"
 #if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
 #    include <esp_timer.h>
 #endif
@@ -67,9 +68,15 @@ int Controller::scanInputs(uint16_t rawPressed, uint32_t now) {
     // release stops adjustments immediately, without changing normal Select events.
     uint16_t shortcutPressed = physicalPressed | (rawPressed & (1 << START));
     auto adjustment = shortcuts.scan(
-        shortcutPressed, now, systemShortcutsEnabled, rawPressed & (1 << SELECT), brightness.isEnabled()
+        shortcutPressed,
+        now,
+        systemShortcutsEnabled,
+        rawPressed & (1 << SELECT),
+        brightness.isEnabled(),
+        devices.canCycleDisplays()
     );
     brightnessSteps = adjustment.brightnessSteps;
+    cycleDisplay = adjustment.cycleDisplay;
     _StateButtons& buttons = *reinterpret_cast<_StateButtons*>(&state);
     state.selectHeld = physicalPressed & (1 << SELECT);
     state.selectConsumed = adjustment.selectConsumed;
@@ -135,6 +142,7 @@ void Controller::inputTask() {
         // on the audio settings task, never in this scan or an application callback.
         if (volumeDelta) audio.stepVolumeShortcut(volumeDelta);
         if (brightnessSteps) brightness.stepBrightnessShortcut(brightnessSteps);
+        if (cycleDisplay) devices.requestCycle();
 #if defined(LILKA_MEASURE_INPUT) && LILKA_MEASURE_INPUT
         const uint32_t workUs = esp_timer_get_time() - scanAt;
         {

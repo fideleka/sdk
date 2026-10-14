@@ -110,6 +110,7 @@
     buzzer
     controller
     display
+    devices
     fileutils
     multiboot
     resources

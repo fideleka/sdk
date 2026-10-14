@@ -16,7 +16,7 @@ void (*hostWriteHook)() = nullptr;
 MockI2S I2S;
 namespace lilka {
 MockSerial serial;
-}
+} // namespace lilka
 using namespace lilka;
 using Event = std::pair<Button, bool>;
 std::vector<Event> events;
@@ -29,7 +29,9 @@ void global(Button button, bool pressed) {
         assert(snapshot.select.pressed && snapshot.start.pressed && snapshot.a.pressed);
     }
 }
-void local(bool) { ++localEvents; }
+void local(bool) {
+    ++localEvents;
+}
 constexpr uint16_t S = 1 << SELECT, T = 1 << START;
 int scan(Controller& controller, uint16_t mask, uint32_t now) {
     hostNow = now;
@@ -45,7 +47,8 @@ void callbacks(Controller& controller) {
     events.clear();
     localEvents = 0;
     controller.setGlobalHandler(global);
-    for (int i = 0; i < ANY; ++i) controller.setHandler(static_cast<Button>(i), local);
+    for (int i = 0; i < ANY; ++i)
+        controller.setHandler(static_cast<Button>(i), local);
 }
 void invisible(const ButtonState& state) {
     assert(!state.pressed && !state.justPressed && !state.justReleased && !state.nextRepeatTime);
@@ -177,6 +180,19 @@ void chordTests() {
         assert((*reinterpret_cast<_StateButtons*>(&c.state))[direction].justReleased);
         assert(events.back() == Event(static_cast<Button>(direction), false));
     }
+    detail::SystemShortcuts modes;
+    const uint16_t d = 1 << D;
+    modes.scan(S, 100, true, true, false, true);
+    auto mode = modes.scan(S | d, 120, true, true, false, true);
+    assert(mode.cycleDisplay && mode.selectConsumed && (mode.suppressed & d));
+    assert(!modes.scan(S | d, 1000, true, true, false, true).cycleDisplay);
+    assert(modes.scan(S, 1020, true, true, false, true).suppressed & d);
+    modes.scan(0, 1040, true, true, false, true);
+    modes.scan(S, 1060, true, true, false, true);
+    assert(!modes.scan(S | d | T, 1080, true, true, false, true).cycleDisplay);
+    detail::SystemShortcuts unavailable;
+    unavailable.scan(S, 100, true);
+    assert(!unavailable.scan(S | d, 120, true).cycleDisplay);
     puts("Chord arbitration, repeats, callbacks and release suppression PASS");
 }
 void ordinaryTests() {
@@ -224,7 +240,9 @@ void gentleShortcutTests() {
         const int expected[] = {2, 3, 4, 5, 10, 15};
         uint32_t now = 2420;
         for (int level : expected) {
-            if (!held) { scan(c, S, now - 20); }
+            if (!held) {
+                scan(c, S, now - 20);
+            }
             assert(scan(c, S | 1, now) == 5);
             assert(audio.getVolume() == level);
             assert(audio.getVolumeOverlay().adjustedAt == now);
@@ -250,8 +268,8 @@ void gentleShortcutTests() {
             hostWrites = 0;
             scan(c, S, 20000);
             uint32_t now = 20020;
-            const std::vector<int> expected = initial == 4 ? std::vector<int>{3, 2, 1, 0, 0} :
-                                                           std::vector<int>{5, 0, 0};
+            const std::vector<int> expected =
+                initial == 4 ? std::vector<int>{3, 2, 1, 0, 0} : std::vector<int>{5, 0, 0};
             for (size_t i = 0; i < expected.size(); ++i) {
                 if (i && !held) scan(c, S, now - 20);
                 assert(scan(c, S | (1 << DOWN), now) == -5);
@@ -328,7 +346,8 @@ void persistenceTests() {
     assert(audio.getVolume() == 0);
     int16_t samples[] = {32767, -32768, 1000, -1000};
     audio.adjustVolume(samples, sizeof(samples), 16, audio.getVolume());
-    for (auto sample : samples) assert(sample == 0);
+    for (auto sample : samples)
+        assert(sample == 0);
     audio.changeVolumeLive(-5);
     assert(audio.getVolume() == 0);
     audio.changeVolumeLive(1000);
@@ -416,7 +435,8 @@ void idleWakeTests() {
 }
 int main() {
     assert(audio.getVolume() == 50 && hostReads == 1);
-    for (int i = 0; i < 100; ++i) assert(audio.getVolume() == 50);
+    for (int i = 0; i < 100; ++i)
+        assert(audio.getVolume() == 50);
     assert(hostReads == 1);
     audio.begin();
     audio.begin();

@@ -3,7 +3,7 @@
 #include "config.h"
 #include "display_settings.h"
 
-#if LILKA_VERSION == 2 && LILKA_INDEPENDENT_BACKLIGHT
+#if LILKA_VERSION == 2
 #    include <driver/ledc.h>
 #    include <driver/gpio.h>
 #    include <freertos/FreeRTOS.h>
@@ -16,12 +16,13 @@
 
 namespace lilka {
 namespace {
+constexpr bool nativeControl = LILKA_INDEPENDENT_BACKLIGHT;
 constexpr ledc_mode_t mode = LEDC_LOW_SPEED_MODE;
 constexpr ledc_channel_t channel = LEDC_CHANNEL_7;
 std::atomic<bool> enabled{false};
 std::atomic<bool> idleDimmed{false};
 std::atomic<int> requested{100};
-SemaphoreHandle_t hardwareMutex = nullptr;
+SemaphoreHandle_t hardwareMutex = 0;
 portMUX_TYPE snapshotMux = portMUX_INITIALIZER_UNLOCKED;
 VolumeOverlaySnapshot feedback;
 bool sleeping = false;
@@ -39,12 +40,15 @@ uint32_t brightnessDuty(int level) {
 }
 
 bool apply(int level) {
-    const bool nativeOk = ledc_set_duty(mode, channel, nativeActive ? brightnessDuty(level) : 0) == ESP_OK &&
-                          ledc_update_duty(mode, channel) == ESP_OK;
+#    if LILKA_INDEPENDENT_BACKLIGHT
+    if (ledc_set_duty(mode, channel, nativeActive ? brightnessDuty(level) : 0) != ESP_OK ||
+        ledc_update_duty(mode, channel) != ESP_OK)
+        return false;
+#    endif
     const bool externalOk =
         externalPin < 0 || (ledc_set_duty(mode, LEDC_CHANNEL_6, externalActive ? brightnessDuty(level) : 0) == ESP_OK &&
                             ledc_update_duty(mode, LEDC_CHANNEL_6) == ESP_OK);
-    return nativeOk && externalOk;
+    return externalOk;
 }
 
 int effectiveLevel() {
@@ -83,6 +87,9 @@ bool update(int value, bool relative, bool showFeedback) {
 } // namespace
 
 bool Brightness::begin() {
+    return nativeControl && beginOutput();
+}
+bool Brightness::beginOutput() {
     if (enabled.load()) return true;
     if (!hardwareMutex) hardwareMutex = xSemaphoreCreateMutex();
     if (!hardwareMutex) return false;
@@ -107,10 +114,12 @@ bool Brightness::begin() {
     output.intr_type = LEDC_INTR_DISABLE;
     output.gpio_num = LILKA_SLEEP;
     output.duty = initial == 100 ? 256 : (initial * 255 + 50) / 100;
-    if (ledc_timer_config(&timer) != ESP_OK || ledc_channel_config(&output) != ESP_OK) {
-        gpio_reset_pin(static_cast<gpio_num_t>(LILKA_SLEEP));
-        gpio_set_direction(static_cast<gpio_num_t>(LILKA_SLEEP), GPIO_MODE_OUTPUT);
-        gpio_set_level(static_cast<gpio_num_t>(LILKA_SLEEP), 1);
+    if (ledc_timer_config(&timer) != ESP_OK || (nativeControl && ledc_channel_config(&output) != ESP_OK)) {
+        if (nativeControl) {
+            gpio_reset_pin(static_cast<gpio_num_t>(LILKA_SLEEP));
+            gpio_set_direction(static_cast<gpio_num_t>(LILKA_SLEEP), GPIO_MODE_OUTPUT);
+            gpio_set_level(static_cast<gpio_num_t>(LILKA_SLEEP), 1);
+        }
         return false;
     }
     requested.store(initial);
@@ -122,10 +131,12 @@ bool Brightness::begin() {
     // Persistence never runs on the controller/audio task or under hardwareMutex.
     if (!detail::SettingsPersistence::begin(1, &Brightness::servicePersistence)) {
         enabled.store(false);
-        ledc_stop(mode, channel, 1);
-        gpio_reset_pin(static_cast<gpio_num_t>(LILKA_SLEEP));
-        gpio_set_direction(static_cast<gpio_num_t>(LILKA_SLEEP), GPIO_MODE_OUTPUT);
-        gpio_set_level(static_cast<gpio_num_t>(LILKA_SLEEP), 1);
+        if (nativeControl) ledc_stop(mode, channel, 1);
+        if (nativeControl) {
+            gpio_reset_pin(static_cast<gpio_num_t>(LILKA_SLEEP));
+            gpio_set_direction(static_cast<gpio_num_t>(LILKA_SLEEP), GPIO_MODE_OUTPUT);
+            gpio_set_level(static_cast<gpio_num_t>(LILKA_SLEEP), 1);
+        }
         requested.store(100);
         return false;
     }
@@ -134,17 +145,16 @@ bool Brightness::begin() {
 }
 
 bool Brightness::isEnabled() {
-    return enabled.load();
+    return enabled.load() && (nativeControl || externalPin.load() >= 0);
 }
 bool Brightness::isPWMChannelReserved(int value) {
-    return enabled.load() && (value == 6 || value == 7);
+    return isEnabled() && (value == 6 || value == 7);
 }
-bool Brightness::attachExternalBacklight(int pin) {
-    if (!enabled.load()) return false;
+bool Brightness::attachExternalBacklight(int pin, bool initiallyActive) {
     bool allowed = false;
     for (auto candidate : LILKA_EXT_PINS)
         if (pin == candidate) allowed = true;
-    if (!allowed) return false;
+    if (!allowed || (!enabled.load() && !beginOutput())) return false;
     xSemaphoreTake(hardwareMutex, portMAX_DELAY);
     if (externalPin >= 0) {
         xSemaphoreGive(hardwareMutex);
@@ -154,15 +164,17 @@ bool Brightness::attachExternalBacklight(int pin) {
     // Initialize the existing timer's second channel, then route its signal
     // to an explicitly released open-drain pad without driving HIGH.
     const auto gpio = static_cast<gpio_num_t>(pin);
-    bool ok = ledc_bind_channel_timer(mode, LEDC_CHANNEL_6, LEDC_TIMER_3) == ESP_OK &&
-              ledc_set_duty_with_hpoint(mode, LEDC_CHANNEL_6, brightnessDuty(effectiveLevel()), 0) == ESP_OK &&
-              ledc_update_duty(mode, LEDC_CHANNEL_6) == ESP_OK;
+    bool ok =
+        ledc_bind_channel_timer(mode, LEDC_CHANNEL_6, LEDC_TIMER_3) == ESP_OK &&
+        ledc_set_duty_with_hpoint(mode, LEDC_CHANNEL_6, initiallyActive ? brightnessDuty(effectiveLevel()) : 0, 0) ==
+            ESP_OK &&
+        ledc_update_duty(mode, LEDC_CHANNEL_6) == ESP_OK;
     ok = ok && gpio_reset_pin(gpio) == ESP_OK && gpio_set_pull_mode(gpio, GPIO_FLOATING) == ESP_OK &&
          gpio_set_level(gpio, 1) == ESP_OK && gpio_set_direction(gpio, GPIO_MODE_OUTPUT_OD) == ESP_OK;
     if (ok) {
         esp_rom_gpio_connect_out_signal(pin, LEDC_LS_SIG_OUT0_IDX + LEDC_CHANNEL_6, false, false);
         externalPin = pin;
-        externalActive = true;
+        externalActive = initiallyActive;
     } else {
         ledc_stop(mode, LEDC_CHANNEL_6, 1);
         gpio_reset_pin(gpio);
@@ -202,7 +214,8 @@ bool Brightness::setActiveDisplays(bool native, bool external) {
 }
 
 bool Brightness::isPinReserved(int pin) {
-    return enabled.load() && (pin == LILKA_SLEEP || (externalPin.load() >= 0 && pin == externalPin.load()));
+    return enabled.load() &&
+           ((nativeControl && pin == LILKA_SLEEP) || (externalPin.load() >= 0 && pin == externalPin.load()));
 }
 int Brightness::getBrightness() {
     return enabled.load() ? requested.load() : 100;
@@ -306,7 +319,7 @@ bool Brightness::isEnabled() {
 bool Brightness::isPWMChannelReserved(int) {
     return false;
 }
-bool Brightness::attachExternalBacklight(int) {
+bool Brightness::attachExternalBacklight(int, bool) {
     return false;
 }
 void Brightness::detachExternalBacklight() {
