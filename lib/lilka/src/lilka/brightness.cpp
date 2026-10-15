@@ -352,7 +352,7 @@ bool Brightness::undim() {
     return false;
 }
 VolumeOverlaySnapshot Brightness::getOverlay() {
-    return {};
+    return VolumeOverlaySnapshot();
 }
 bool Brightness::suspend() {
     return false;
