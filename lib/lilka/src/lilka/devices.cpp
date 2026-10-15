@@ -1211,7 +1211,7 @@ DeviceManager devices;
 
 namespace lilka {
 VolumeOverlaySnapshot DeviceManager::getOverlay() {
-    if (!frameMutex) return {};
+    if (!frameMutex) return VolumeOverlaySnapshot();
     xSemaphoreTake(frameMutex, portMAX_DELAY);
     const auto result = modeFeedback;
     xSemaphoreGive(frameMutex);
