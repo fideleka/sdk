@@ -105,13 +105,22 @@ void Display::showNativeGrayDiagnostic() {
         serial.log("RAW565 diagnostic skipped: native output inactive");
         return;
     }
-    serial.log("RAW565 diagnostic: dark/full/red/green/blue rows, 20 seconds");
+    serial.log("RAW565 EPF A/B: upper F0, lower E0; identical input words, 20 seconds");
     const int16_t panelWidth = Arduino_ST7789::width();
     const int16_t panelHeight = Arduino_ST7789::height();
-    for (int row = 0; row < 5; ++row) {
+    // RAMCTRL EPF converts incoming RGB565 words into the panel's 18-bit RAM.
+    // The two halves keep identical source words, but use different expansion.
+    // Only EPF0 changes: F0 (green-bit copy) versus E0 (own-channel MSB copy).
+    for (int band = 0; band < 10; ++band) {
+        const int row = band % 5;
+        if (row == 0) {
+            _bus->beginWrite();
+            _bus->writeC8D16(0xB0, band == 0 ? 0x00F0 : 0x00E0);
+            _bus->endWrite();
+        }
         const int columns = row == 0 ? 16 : 32;
-        const int16_t top = row * panelHeight / 5;
-        const int16_t bottom = (row + 1) * panelHeight / 5;
+        const int16_t top = band * panelHeight / 10;
+        const int16_t bottom = (band + 1) * panelHeight / 10;
         for (int column = 0; column < columns; ++column) {
             uint16_t color = 0;
             if (row < 2) {
@@ -121,7 +130,7 @@ void Display::showNativeGrayDiagnostic() {
             } else if (row == 2) {
                 color = static_cast<uint16_t>(column) << 11;
             } else if (row == 3) {
-                color = static_cast<uint16_t>(column * 2) << 5;
+                color = static_cast<uint16_t>(column) << 5;
             } else {
                 color = column;
             }
@@ -138,6 +147,9 @@ void Display::showNativeGrayDiagnostic() {
     }
     vTaskDelay(pdMS_TO_TICKS(20000));
     _bus->beginWrite();
+    // Restore the pre-test reset-default expansion before normal Keira drawing.
+    // EPF changes the conversion at write time, not pixels already in panel RAM.
+    _bus->writeC8D16(0xB0, 0x00F0);
     Arduino_ST7789::writeAddrWindow(0, 0, panelWidth, panelHeight);
     _bus->writeRepeat(colors::Black, static_cast<uint32_t>(panelWidth) * panelHeight);
     _bus->endWrite();

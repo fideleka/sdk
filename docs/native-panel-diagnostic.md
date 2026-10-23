@@ -111,7 +111,7 @@ than stop for unrelated baseline fixes.
 No firmware was built or flashed. The active SDK checkout and staging refs remain
 unchanged.
 
-## Direct raw-pattern follow-up
+## Previous direct raw-pattern follow-up (superseded by EPF A/B below)
 
 Owner result with the original reset-default diagnostic: no visible change;
 black still jumps to light stripes. Do not call the original gamma table the
@@ -178,3 +178,79 @@ needed for the raw test. Normal startup resumes automatically.
 - Full repository checks retain exactly 143 formatting diagnostics and the same
   12 normalized static-analysis findings as the base; no unrelated fixes included.
 - No firmware build or flash.
+
+## Current test: RGB565 expansion A/B (EPF)
+
+The first raw-pattern test retained the leap above black. Anton subsequently
+checked Doom and no longer considers the apparent tonal improvement reliable.
+The cause remains unresolved; no improvement is claimed.
+
+A more specific reference lead is RAMCTRL (B0h), EPF[1:0]. The installed GFX
+sequence writes `00 F0`; controller reset defaults are also `00 F0`. Thus the
+original-versus-reset-default test did not distinguish this conversion setting.
+
+The ST7789 converts 16-bit input pixels to 18-bit panel RAM. EPF=11 can use the
+least-significant green bit as the missing red/blue bit. A documented ST7789V
+case found unwanted gray on odd green levels and fixed it by changing EPF.
+Maintained TFT_eSPI explicitly uses `00 E0` (EPF=10), copying each channel's own
+most-significant bit instead. This is a concrete candidate, not proof that it
+explains Anton's larger jump or identifies his controller variant.
+
+Sources:
+
+- [ST7789V3 preliminary v0.0, RAMCTRL pp. 219–221](https://dl.sipeed.com/fileList/MAIX/HDK/Chip_DS/ST7789V3_SPEC_Preliminary_V0.0_200102.pdf).
+- [Reported odd-green issue and solution, post 13](https://forum.arduino.cc/t/problem-with-st7789v-displays-green-value-1-and-every-other-uneven-is-gray/700584/13).
+- [TFT_eSPI ST7789 initialization](https://github.com/Bodmer/TFT_eSPI/blob/master/TFT_Drivers/ST7789_Init.h),
+  main sequence RAMCTRL `00 E0`. The forum's author initially selected `00 C0`;
+  this test selects the maintained driver's `00 E0`, not a copied voltage table.
+
+### What this branch now shows
+
+For 20 seconds at startup the internal screen shows **two stacked copies of
+the same five-row pattern**:
+
+- **Upper half: A, RAMCTRL `00 F0`**, the existing/default conversion.
+- **Lower half: B, RAMCTRL `00 E0`**, the alternative conversion.
+
+Each half has dark gray, full gray, red, green and blue rows. Corresponding
+source RGB565 words are identical. Green now steps through **0..31 by one**,
+including odd levels omitted by the previous full-green ramp. Only bit4 of
+RAMCTRL's second parameter differs. Endianness, interface selection, gamma,
+drive values, brightness and the **80-MHz clock remain unchanged**.
+
+EPF converts incoming data when it is written to frame RAM. This permits both
+conversions in one captured frame. Before normal Keira startup the test restores
+`00 F0` and clears black. The alternative does **not** remain active in Doom or
+normal Keira use. No NVS values are written. External output remains untouched.
+If native output is inactive, the test skips without sending these commands.
+
+Use the exact automated command in the preceding handoff section, select only
+Keira, and photograph the **whole screen** during the 20-second A/B display.
+Compare the first dark steps in the top and bottom halves and odd green levels.
+No separate flashing or manual branch switching is required.
+
+### Interpretation
+
+- B improves the dark steps: EPF conversion contributes to the symptom; determine
+  whether it corrects the full symptom before promoting a production change.
+- B only removes tint/alternating odd-green steps: this is a separate conversion
+  issue; the large black-to-light jump still needs investigation.
+- A and B look the same: the test shows no visible benefit from the alternative;
+  register writes may also be unavailable on some module configurations, so a
+  no-change result alone does not prove which EPF mode the panel accepted.
+
+### Verification
+
+The host recorder exercises the production method for both orientations and
+inactive output. It checks identical input words between halves, per-pixel
+F0/E0 write-time mode, exact `F0 → E0 → F0` command sequence, full coverage,
+16/32 distinct source levels and black restoration. It does not simulate analog
+panel brightness or prove physical register acceptance. The source-framebuffer
+preview verifies tiling only, not the predicted color difference on glass.
+
+EPF A/B verification: all 56 host cases pass; the real ESP32-S3 display
+translation unit passes syntax-only checking. The changed production file
+passes clang-format 20.1.2 and scoped cppcheck with the same documented baseline
+suppressions. The two-half source pattern was visually inspected. Full checks
+retain the 143 baseline formatting diagnostics; the same 12 normalized static-analysis findings remain on both revisions. Firmware build, physical register acceptance and device
+appearance remain unverified until the owner runs the automated test.

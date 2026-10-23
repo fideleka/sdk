@@ -20,6 +20,9 @@ MOCK = r'''
 inline int panelWidth=280,panelHeight=240,left=0,top=0,rectWidth=0,rectHeight=0;
 inline bool active=true,transaction=false,captured=false;
 inline unsigned writes=0;
+inline unsigned expansion=0xf0;
+inline std::vector<unsigned> modes;
+inline std::vector<unsigned> pixelModes;
 inline std::vector<uint16_t> pixels;
 inline std::vector<int> covered;
 inline unsigned pdMS_TO_TICKS(unsigned value){return value;}
@@ -29,17 +32,25 @@ inline void vTaskDelay(unsigned value){
  captured=true;
  for(int count:covered)assert(count==1);
  const int rows[]={16,32,32,32,32};
- for(int row=0;row<5;++row){
+ for(int band=0;band<10;++band){
+  const int row=band%5;
   std::set<uint16_t> distinct;
-  int y=(row*panelHeight/5+(row+1)*panelHeight/5)/2;
-  for(int x=0;x<panelWidth;++x)distinct.insert(pixels[y*panelWidth+x]);
+  int y=(band*panelHeight/10+(band+1)*panelHeight/10)/2;
+  for(int x=0;x<panelWidth;++x){
+   distinct.insert(pixels[y*panelWidth+x]);
+   assert(pixelModes[y*panelWidth+x]==(band<5?0xf0u:0xe0u));
+  }
   assert(distinct.size()==static_cast<unsigned>(rows[row]));
   assert(pixels[y*panelWidth]==0);
  }
  assert(pixels[panelWidth/16]==0x0020); // RGB8(4,4,4) quantizes to this word.
- assert(pixels[2*panelHeight/5*panelWidth+panelWidth-1]==0xf800);
- assert(pixels[3*panelHeight/5*panelWidth+panelWidth-1]==0x07c0);
- assert(pixels[4*panelHeight/5*panelWidth+panelWidth-1]==0x001f);
+ assert(pixels[2*panelHeight/10*panelWidth+panelWidth-1]==0xf800);
+ assert(pixels[3*panelHeight/10*panelWidth+panelWidth-1]==0x03e0);
+ assert(pixels[4*panelHeight/10*panelWidth+panelWidth-1]==0x001f);
+ assert(expansion==0xe0);
+ assert(modes==std::vector<unsigned>({0xf0,0xe0}));
+ for(int y=0;y<panelHeight/2;++y)for(int x=0;x<panelWidth;++x)
+  assert(pixels[y*panelWidth+x]==pixels[(y+panelHeight/2)*panelWidth+x]);
  const char* output=std::getenv("RAW_PATTERN_PPM");
  if(output){
   FILE* file=std::fopen(output,"wb");assert(file);
@@ -62,12 +73,17 @@ inline Serial serial;
 struct Bus{
  void beginWrite(){assert(!transaction);transaction=true;}
  void endWrite(){assert(transaction);transaction=false;}
+ void writeC8D16(uint8_t command,uint16_t data){
+  assert(transaction&&command==0xb0&&(data==0x00f0||data==0x00e0));
+  expansion=data;modes.push_back(data);
+ }
  void writeRepeat(uint16_t color,uint32_t count){
   assert(transaction&&count==static_cast<uint32_t>(rectWidth*rectHeight));
   ++writes;
   for(int y=top;y<top+rectHeight;++y)for(int x=left;x<left+rectWidth;++x){
    assert(x>=0&&x<panelWidth&&y>=0&&y<panelHeight);
    pixels[y*panelWidth+x]=color;
+   pixelModes[y*panelWidth+x]=expansion;
    if(!captured)++covered[y*panelWidth+x];
   }
  }
@@ -89,14 +105,15 @@ MAIN = r'''
 int main(int argc,char**argv){
  assert(argc==4);panelWidth=std::atoi(argv[1]);panelHeight=std::atoi(argv[2]);
  active=std::atoi(argv[3]);pixels.assign(panelWidth*panelHeight,0xabcd);
- covered.assign(pixels.size(),0);
+ covered.assign(pixels.size(),0);pixelModes.assign(pixels.size(),0);
  lilka::Display display;display.showNativeGrayDiagnostic();
  assert(!transaction);
  if(active){
-  assert(captured&&writes==145);
+  assert(captured&&writes==289&&expansion==0xf0);
+  assert(modes==std::vector<unsigned>({0xf0,0xe0,0xf0}));
   for(uint16_t pixel:pixels)assert(pixel==0); // Black restored before app startup.
  }else{
-  assert(!captured&&writes==0);
+  assert(!captured&&writes==0&&modes.empty());
   for(uint16_t pixel:pixels)assert(pixel==0xabcd);
  }
 }
@@ -111,4 +128,4 @@ with tempfile.TemporaryDirectory(prefix='lilka-raw-pattern-') as temporary:
                     str(cpp), '-o', str(binary)], check=True)
     for width, height, active in ((280, 240, 1), (240, 280, 1), (280, 240, 0)):
         subprocess.run([str(binary), str(width), str(height), str(active)], check=True)
-print('PASS: raw RGB565 coverage, 16/32 distinct steps, routing bypass, black restore, inactive-output skip')
+print('PASS: identical A/B words, F0/E0 bit-only command sequence, 16/32 steps, routing bypass, F0/black restore, inactive skip')
