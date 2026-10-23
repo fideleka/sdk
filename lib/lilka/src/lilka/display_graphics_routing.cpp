@@ -1,6 +1,14 @@
 #include "display.h"
 
 namespace lilka {
+size_t Display::write(const uint8_t* buffer, size_t size) {
+    if (!size) return 0;
+    DisplayFrame completed(*this);
+    // Keep Arduino_GFX's byte writer and UTF-8 decoder on this instance.
+    // Nested drawChar transactions must not publish intermediate glyphs.
+    return Print::write(buffer, size);
+}
+
 // Accelerated TFT methods may bypass writePixel. Mirror their completed result
 // into RAM, then use the native optimized path without recursively mirroring it.
 void Display::writeSlashLine(int16_t x0, int16_t y0, int16_t x1, int16_t y1, uint16_t color) {
