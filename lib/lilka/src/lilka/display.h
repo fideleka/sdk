@@ -357,6 +357,9 @@ public:
     void drawSystemOverlay();
 
 private:
+#if LILKA_VERSION == 2
+    void tftInit() override;
+#endif
     Canvas* routedCanvas = nullptr;
     bool layeredPresentation = false, routingDirty = false, nativeBypass = false, nativeWrite = true,
          routingStarted = false, routingAllocationFailed = false, nativePanelOn = true;
