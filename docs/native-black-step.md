@@ -14,6 +14,12 @@ states the original colors are fine. Do not turn this task into color correction
 - The EPF comparison showed a conversion-mode difference, not an accepted color
   defect. The original F0 expansion is preserved. In F0, the green LSB fills the
   missing red/blue bit and permits all 64 neutral gray levels from RGB565 words.
+- The first targeted test (d80364f) changed V1/V2 and the owner observed changes
+  near white, not near black. This establishes the wrong visible endpoint was
+  targeted. It does not show that near-black calibration cannot affect the defect.
+- The existing IPS configuration sends INVON; its optical endpoint mapping must
+  not be assumed from gamma register indices. Keep inversion unchanged and use
+  the observed endpoint response to choose the next controls.
 - No exact panel variant or physical defect has been established.
 
 ## Scope of this branch
@@ -27,34 +33,42 @@ external-display or NVS setting is changed. The only startup addition is a
 conditional native test after backlight resume, before application/idle drawing.
 External-only output skips the test.
 
-## Why these two fields
+## Why these two fields — corrected endpoint
 
-Sitronix ST7789V2 v1.0 p.144 and ST7789V3 preliminary v0.0 p.105 describe the
-first gray-level source voltages through V1P/V1N and V2P/V2N, in E0/E1.
-The formula for the first positive interval is:
+The owner observed that V1/V2 changed highlights. The active comparison therefore
+leaves V1/V2 at their original values and tests the opposite end: V61P/N and
+V62P/N, while preserving the V63 endpoint itself. This correction is based on the
+device result, not an assumption that a low gamma-table index means dark.
 
-`VP0 - VP1 = (VAP - VBP) * (1 + V1P - V0P) / 129`.
+Sitronix ST7789V2 v1.0 pp.145–146 and ST7789V3 preliminary v0.0 pp.106–107 give:
 
-With the original table's V0=0 and V1=9, this is 10/129 of the reference span.
-With V1=0, it is 1/129. The corresponding second point changes from 20/129 to
-3/129 of the span when V2 changes from 19 to 2. These are **voltage ratios**, not
-measured light output or a guarantee of suitable panel calibration. Both versions
-use the same relevant formulas and field layout; actual installed variant is
-still unknown.
+- `VP63 = (VAP - VBP) * (23 - V63P) / 129 + VBP`
+- `VP62 = (VAP - VBP) * (64 - V62P) / 129 + VBP`
+- `VP61 = (VAP - VBP) * (64 - V61P) / 129 + VBP`
 
-The test rewrites the original 14-byte positive and negative tables but changes
-only indices 1 and 2:
+The negative polarity has matching interval magnitudes. With original V63=15,
+the endpoint coefficient is 8. Original V62=33 and V61=29 give coefficients 31
+and 35: gaps of 23/129 and 27/129 of the reference span. The test uses V62=55 and
+V61=53, giving coefficients 9 and 11: gaps of 1/129 and 3/129. The black endpoint
+and all supply/reference settings remain fixed.
 
-| Condition | V1P/V1N | V2P/V2N | All other table bytes |
+These are **voltage ratios**, not measured light output or proof of a suitable
+calibration. Both V2 and V3 documents give these formulas and field layouts;
+the exact installed variant remains unknown.
+
+Only indices 12 and 13 of each original 14-byte table change:
+
+| Condition | V61P/V61N | V62P/V62N | Remaining 24 table bytes |
 |---|---|---|---|
-| 1: original | 09 | 13 | Original GFX 1.6.0 values |
-| 2: test | 00 | 02 | Exact same original values |
+| 1: original | `1D` (29) | `21` (33) | Original GFX 1.6.0 values |
+| 2: test | `35` (53) | `37` (55) | Exact same original values |
 
-V2 is an input to interpolation for other dark points below level 20. Therefore
-this is not a claim that only pixels with codes 1/2 can change. The other register
-parameters and the level 20-and-higher voltage anchors remain unchanged. This
-specifically tests the near-black portion instead of replacing a full curve.
-No register readback or analog panel-voltage measurement has been performed.
+V61 contributes to interpolated points between levels 43 and 61. Thus nearby
+shadows can change too; this is not a promise that only two pixel values change.
+V63 and the low-index/white-side controls remain unchanged. V1/V2 are explicitly
+restored to the original 09/13 in both conditions; no part of the previous
+white-end test remains active. No register readback or analog voltage measurement
+has been performed.
 
 ## Owner test — existing automation only
 
@@ -85,7 +99,8 @@ firmware's initialization restores the original setup; nothing is saved.
   C retention, centered labels, complete pattern coverage, unchanged input words,
   16/64 neutral frame-RAM levels under F0 and inactive-output skip.
 - The command recorder permits only E0/E1 with exactly 14 bytes. It checks every
-  byte: only V1/V2 may differ, and B restores all 28 original bytes.
+  byte: only V61/V62 may differ, and B restores all 28 original bytes. It also
+  checks fixed V63/white-side values and ordered endpoint voltage coefficients.
 - The two original arrays were independently compared against the installed
   pinned GFX initialization header: all 28 bytes match exactly.
 - `python3 -B tests/display_startup/run.py`: 48 startup cases with/without the hook.

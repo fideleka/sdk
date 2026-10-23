@@ -42,7 +42,15 @@ inline void observeFrame() {
     for (unsigned polarity = 0; polarity < 2; ++polarity) {
         const auto& data = tables[2 * stages + polarity];
         for (unsigned i = 0; i < 14; ++i)
-            assert(data[i] == (adjusted && i == 1 ? 0 : (adjusted && i == 2 ? 2 : original[polarity][i])));
+            assert(data[i] == (adjusted && i == 12 ? 0x35 : (adjusted && i == 13 ? 0x37 : original[polarity][i])));
+        // Controller source-voltage coefficients; not a luminance simulation.
+        const int v63 = 23 - (data[0] >> 4);
+        const int v62 = 64 - data[13];
+        const int v61 = 64 - data[12];
+        const int v43 = 128 - data[8];
+        assert(v62 - v63 == (adjusted ? 1 : 23));
+        assert(v61 - v63 == (adjusted ? 3 : 27));
+        assert(v43 > v61 && v61 > v62 && v62 > v63);
     }
     const int patternHeight = panelHeight - headerHeight;
     for (int row = 0; row < 2; ++row) {
@@ -231,7 +239,8 @@ int main(int argc, char** argv) {
             const auto& data = tables[tables.size() - 2 + polarity];
             for (unsigned i = 0; i < 14; ++i)
                 assert(
-                    data[i] == (inputCase == 2 && i == 1 ? 0 : (inputCase == 2 && i == 2 ? 2 : original[polarity][i]))
+                    data[i] ==
+                    (inputCase == 2 && i == 12 ? 0x35 : (inputCase == 2 && i == 13 ? 0x37 : original[polarity][i]))
                 );
         }
         for (uint16_t pixel : pixels)
@@ -256,4 +265,4 @@ with tempfile.TemporaryDirectory(prefix='lilka-black-step-') as temporary:
         (280, 240, 1, 1), (280, 240, 1, 2), (240, 280, 1, 2)
     ):
         subprocess.run([str(binary), str(width), str(height), str(active), str(input_case)], check=True)
-print('PASS: only V1/V2 differ; original restored on B, retained on C; A toggle/hold, neutral 16/64 levels, safe labels, inactive skip')
+print('PASS: only V61/V62 differ; V63/white fields fixed, ordered endpoint gaps; original restored on B, retained on C; A toggle/hold, neutral 16/64 levels, safe labels, inactive skip')

@@ -84,13 +84,16 @@ void Display::showNativeBlackStepDiagnostic() {
         serial.log("Near-black diagnostic skipped: native output inactive");
         return;
     }
-    // Exact original pinned GFX 1.6.0 tables. Only indices 1/2 may change below.
+    // Exact original pinned GFX 1.6.0 tables. Only indices 12/13 may change below.
     // Keep original initialization, expansion, inversion, drive and 80-MHz clock.
     uint8_t positive[14] = {0xF0, 0x09, 0x13, 0x12, 0x12, 0x2B, 0x3C, 0x44, 0x4B, 0x1B, 0x18, 0x17, 0x1D, 0x21};
     uint8_t negative[14] = {0xF0, 0x09, 0x13, 0x0C, 0x0D, 0x27, 0x3B, 0x44, 0x4D, 0x0B, 0x17, 0x17, 0x1D, 0x21};
+    // Device A/B located V1/V2 at the visible white end. Preserve those fields.
+    // With V63=15 unchanged, V62=55 and V61=53 place adjacent source voltages
+    // 1/129 and 3/129 of the reference span from V63 (originally 23/129, 27/129).
     const auto applyAnchors = [&](bool adjusted) {
-        positive[1] = negative[1] = adjusted ? 0x00 : 0x09;
-        positive[2] = negative[2] = adjusted ? 0x02 : 0x13;
+        positive[12] = negative[12] = adjusted ? 0x35 : 0x1D;
+        positive[13] = negative[13] = adjusted ? 0x37 : 0x21;
         _bus->beginWrite();
         _bus->writeCommand(0xE0);
         _bus->writeBytes(positive, sizeof(positive));
@@ -125,7 +128,7 @@ void Display::showNativeBlackStepDiagnostic() {
     bool adjusted = false;
     bool finished = false;
     bool keep = false;
-    serial.log("Near-black A/B: 1 original, 2 adjusted V1/V2; A toggles, B restores, C keeps this boot");
+    serial.log("Near-black A/B: 1 original, 2 adjusted V61/V62; A toggles, B restores, C keeps this boot");
     while (!finished) {
         applyAnchors(adjusted);
         _bus->beginWrite();
