@@ -257,6 +257,9 @@ public:
     void displayOff() override;
     void beginFrame();
     void endFrame();
+    using Arduino_ST7789::write;
+    /// Publish a complete text buffer once, not once per decoded glyph.
+    size_t write(const uint8_t* buffer, size_t size) override;
     void startWrite() override;
     void endWrite() override;
     void writeAddrWindow(int16_t x, int16_t y, uint16_t w, uint16_t h) override;
