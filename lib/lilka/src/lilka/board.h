@@ -39,6 +39,9 @@ public:
     /// Налаштувати плату.
     /// \warning Цей метод викликається автоматично при виклику `lilka::begin()`.
     void begin();
+    /// Keep an independently controlled native backlight dark during SDK startup.
+    /// Stock amplifier-shared GPIO behavior is unchanged.
+    void begin(bool displayReady);
     /// Увімкнути режим енергозбереження.
     ///
     /// Цей метод вимикає дисплей, підсвітку дисплея та I2S-модуль. Його варто викликати перед входом в режим сну або глибокого сну.

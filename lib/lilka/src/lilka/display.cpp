@@ -54,6 +54,9 @@ void Display::begin() {
 #else
     Arduino_ST7789::begin(80000000);
 #endif
+    // LCD RAM can survive a firmware handoff. Never expose an old frame or
+    // adjustment overlay while SD drivers and the saved route are loading.
+    Arduino_ST7789::fillScreen(colors::Black);
     setFont(FONT_10x20);
     setUTF8Print(true);
     serial.log("display ok");

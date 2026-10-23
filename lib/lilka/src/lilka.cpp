@@ -8,7 +8,7 @@ namespace lilka {
 
 void begin() {
     serial.begin();
-    board.begin();
+    board.begin(false);
     multiboot.begin();
     buzzer.begin(); // Play notification sound
     audio.begin();
@@ -18,6 +18,10 @@ void begin() {
     controller.begin(); // Must be initialized AFTER SD card (since SD card somehow messes with GPIO)
     devices.begin(gpio_get_level(static_cast<gpio_num_t>(LILKA_GPIO_SELECT)) == 0);
     display.enableRouting();
+    // Discovery may fall back without activating a driver. Release the boot
+    // backlight hold only after black initialization and final route selection.
+    brightness.setActiveDisplays(devices.internalOutput(), devices.externalOutput());
+    brightness.resume();
     displaySettings.begin();
     battery.begin();
     // TODO: I2S

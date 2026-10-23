@@ -12,6 +12,9 @@ class Brightness {
 public:
     /// Initialized by board.begin(). Stock boards remain unchanged.
     static bool begin();
+    /// initiallyActive=false suspends output until resume(), including route changes.
+    /// Does not change the selected brightness or create adjustment feedback.
+    static bool begin(bool initiallyActive);
     /// True when native PWM or an external BLK output is actually attached.
     static bool isEnabled();
     /// Arduino LEDC channels 6/7 share the reserved low-speed timer.
@@ -45,7 +48,7 @@ public:
     static bool isDimmed();
 
 private:
-    static bool beginOutput();
+    static bool beginOutput(bool initiallyActive = true);
     static uint32_t servicePersistence();
 };
 
