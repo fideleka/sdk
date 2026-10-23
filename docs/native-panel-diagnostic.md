@@ -110,3 +110,71 @@ than stop for unrelated baseline fixes.
 
 No firmware was built or flashed. The active SDK checkout and staging refs remain
 unchanged.
+
+## Direct raw-pattern follow-up
+
+Owner result with the original reset-default diagnostic: no visible change;
+black still jumps to light stripes. Do not call the original gamma table the
+confirmed cause or ask for the same PNG comparison again without a new test.
+
+The branch now enables `LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC=1`. After normal
+backlight resume, but before application drawing and idle dimming start, it
+shows five horizontal rows for 20 seconds, then clears and continues into Keira.
+Rows run from dark to light, left to right:
+
+1. Sixteen dark RGB8 levels: 0, 4, 8, ... 60, quantized to RGB565.
+2. Thirty-two grayscale levels: RGB8 0, 8, 16, ... 248.
+3. Thirty-two red levels, R5=0..31.
+4. Thirty-two green levels, G6=0,2,...62.
+5. Thirty-two blue levels, B5=0..31.
+
+The unequal RGB565 channel precision can tint the darkest nominal grayscale
+steps; this test does not promise continuous or perfectly neutral gradients.
+Look for an abnormally large first jump, not invisible quantization boundaries.
+
+The pattern uses native `writeAddrWindow` and polling `writeRepeat` directly.
+It bypasses PNG/JPEG decoding, retained canvases, output routing and pixel DMA.
+It retains the reset-default initialization and 80-MHz clock from the preceding
+test, so changing initialization is not an additional variable in this follow-up.
+No brightness level, stored settings, external driver, app code or staging ref
+is changed. If native output is inactive, the test logs a skip and does nothing;
+use the existing Internal or Both output selection, not External-only.
+
+If the raw top row has the same black-to-light jump, the defect also exists
+without the viewer, routing or pixel-DMA path. That narrows investigation to the
+remaining common path: polling transfer, controller configuration/response and
+panel electronics. It is not proof of panel damage. If the raw pattern separates
+dark values but the PNG does not, investigate the skipped pixel paths next.
+If the boot pattern never appears, do not interpret the test as a negative;
+verify the selected output and the runner's recorded SDK commit first.
+
+### Exact automated handoff
+
+From the folder containing the existing Windows runner:
+
+```powershell
+.\build-all.cmd --interactive --keira-branch features/stage --sdk-branch diagnostic/native-panel-defaults --no-drivers
+```
+
+Press N, then 1, then Enter to select only Keira. Use the existing upload prompt.
+Photograph the five-row boot pattern during its 20-second display. No PNG is
+needed for the raw test. Normal startup resumes automatically.
+
+### Follow-up verification
+
+- `tests/native_panel_init/raw_pattern.py`: production-method framebuffer recorder
+  under ASan/UBSan checks both orientations, full single-coverage tiling, all
+  16/32 distinct words, native virtual-dispatch bypass, black restoration and
+  inactive-output skip.
+- `tests/display_startup/run.py`: 48 startup cases with/without the raw hook;
+  the diagnostic starts only after backlight resume.
+- `tests/native_panel_init/run.py`: five original initialization cases.
+- Generated framebuffer preview inspected at native resolution; this verifies
+  pattern geometry/content, not the physical panel's tonal response.
+- Changed production files pass clang-format 20.1.2. Changed display.cpp cppcheck
+  passes with the existing inherited-member and volume-overlay findings suppressed.
+- ESP32-S3 syntax-only check against installed real headers passes for display.cpp
+  and the SDK startup translation unit.
+- Full repository checks retain exactly 143 formatting diagnostics and the same
+  12 normalized static-analysis findings as the base; no unrelated fixes included.
+- No firmware build or flash.

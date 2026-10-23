@@ -15,7 +15,7 @@
 #include <cstring>
 #include <esp_heap_caps.h>
 
-#if LILKA_VERSION == 2 && LILKA_NATIVE_PANEL_RESET_DEFAULTS
+#if LILKA_VERSION == 2 && (LILKA_NATIVE_PANEL_RESET_DEFAULTS || LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC)
 #    include <freertos/FreeRTOS.h>
 #    include <freertos/task.h>
 #endif
@@ -96,6 +96,54 @@ bool Display::enablePixelDMA() {
     return false;
 #endif
 }
+
+#if LILKA_VERSION == 2 && LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC
+void Display::showNativeGrayDiagnostic() {
+    // Run before application drawing and idle dimming begin. Honor the existing
+    // output selection: do not power an inactive native panel or touch external.
+    if (!devices.internalOutput()) {
+        serial.log("RAW565 diagnostic skipped: native output inactive");
+        return;
+    }
+    serial.log("RAW565 diagnostic: dark/full/red/green/blue rows, 20 seconds");
+    const int16_t panelWidth = Arduino_ST7789::width();
+    const int16_t panelHeight = Arduino_ST7789::height();
+    for (int row = 0; row < 5; ++row) {
+        const int columns = row == 0 ? 16 : 32;
+        const int16_t top = row * panelHeight / 5;
+        const int16_t bottom = (row + 1) * panelHeight / 5;
+        for (int column = 0; column < columns; ++column) {
+            uint16_t color = 0;
+            if (row < 2) {
+                const uint8_t gray = column * (row == 0 ? 4 : 8);
+                color =
+                    (static_cast<uint16_t>(gray >> 3) << 11) | (static_cast<uint16_t>(gray >> 2) << 5) | (gray >> 3);
+            } else if (row == 2) {
+                color = static_cast<uint16_t>(column) << 11;
+            } else if (row == 3) {
+                color = static_cast<uint16_t>(column * 2) << 5;
+            } else {
+                color = column;
+            }
+            const int16_t left = column * panelWidth / columns;
+            const int16_t right = (column + 1) * panelWidth / columns;
+            _bus->beginWrite();
+            Arduino_ST7789::writeAddrWindow(left, top, right - left, bottom - top);
+            // writeRepeat uses the existing polling bus, not PixelDMABus::writePixels.
+            // Call the native address method explicitly to bypass Display routing.
+            _bus->writeRepeat(color, static_cast<uint32_t>(right - left) * (bottom - top));
+            _bus->endWrite();
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    vTaskDelay(pdMS_TO_TICKS(20000));
+    _bus->beginWrite();
+    Arduino_ST7789::writeAddrWindow(0, 0, panelWidth, panelHeight);
+    _bus->writeRepeat(colors::Black, static_cast<uint32_t>(panelWidth) * panelHeight);
+    _bus->endWrite();
+    serial.log("RAW565 diagnostic complete; continuing normal startup");
+}
+#endif
 
 void Display::showStartupScreen() {
     if (splash != NULL) {

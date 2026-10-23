@@ -22,6 +22,9 @@ void begin() {
     // backlight hold only after black initialization and final route selection.
     brightness.setActiveDisplays(devices.internalOutput(), devices.externalOutput());
     brightness.resume();
+#if LILKA_VERSION == 2 && LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC
+    display.showNativeGrayDiagnostic();
+#endif
     displaySettings.begin();
     battery.begin();
     // TODO: I2S

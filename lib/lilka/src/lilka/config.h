@@ -8,6 +8,11 @@
 #define LILKA_INDEPENDENT_BACKLIGHT 0
 #endif
 
+// Isolated branch: show a direct native RGB565 pattern for 20 seconds at boot.
+#ifndef LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC
+#define LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC 1
+#endif
+
 // Diagnostic only: preserve native ST7789 reset-default gamma/drive settings.
 // This does not change the external display driver or persist panel settings.
 #ifndef LILKA_NATIVE_PANEL_RESET_DEFAULTS
