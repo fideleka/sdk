@@ -1,8 +1,77 @@
 # Native ST7789 tonal-response diagnostic
 
-**Source-only diagnostic draft, not a verified fix.** Normal SDK behavior is
-unchanged. No firmware was built, packaged or flashed, and no staging/remote ref
-was advanced. The external ILI9341 driver is unchanged.
+**Isolated experimental source branch, not a verified fix.** The normal SDK
+checkout, staging refs and external ILI9341 driver are unchanged. This branch
+is published for owner-built device tests; no assistant firmware build or flash.
+
+## Current test: A-controlled gamma presets
+
+The owner’s EPF comparison photo shows reduced alternating tint in the E0
+green row, but the large initial brightness jump persists in both halves.
+Treat the conversion issue separately; the main tonal defect remains unresolved.
+
+The current diagnostic draws one unchanged raw RGB565 pattern, with a visible
+preset number in a black header. **Press A to cycle; press B to exit.** There
+is no timeout or automatic advancement. Holding A does not repeat. The order is
+1 → 2 → 3 → 4 → 1, and each curve stays active until another button press.
+
+| Number | GAMSET parameter | Datasheet nominal curve |
+|---|---|---|
+| 1 | `01` | 2.2 (reset-default selector) |
+| 2 | `02` | 1.8 |
+| 3 | `04` | 2.5 |
+| 4 | `08` | 1.0 |
+
+Both ST7789V2 v1.0 p.194 and ST7789V3 preliminary v0.0 p.153 document these
+standard GAMSET (26h) masks. These are controller preset names, not measured
+panel gamma. The test does not write another module’s E0/E1 analog calibration
+or alter voltage, inversion, brightness, pixel format, or the **80-MHz clock**.
+F0 expansion stays fixed throughout, so only the gamma selector changes.
+
+The dark/full-gray/red/green/blue pixel pattern is written once through the
+native polling bus. Later stages change only GAMSET and the number in the header.
+No decoded media, routing or pixel DMA is used. On B, the test restores selector
+01 and F0, clears black, and continues into Keira. No NVS settings are written.
+The external screen is not drawn to. External-only output skips the test.
+
+### Exact command and observations
+
+```powershell
+.\build-all.cmd --interactive --keira-branch features/stage --sdk-branch diagnostic/native-panel-defaults --no-drivers
+```
+
+Select only Keira with N, then 1, then Enter; accept its existing upload prompt.
+At startup press A to compare the four numbered presets. Report which numbers
+change the midtones and whether any reduces the initial jump. Photograph the
+whole screen at useful numbers; there is no need to hurry or navigate to a PNG.
+Press B when finished. Normal Keira/Doom afterward uses the restored selector,
+not whichever diagnostic number was last visible.
+
+If curves visibly change the image, curve selection affects the panel output;
+judge the first step separately from midtone changes. If none changes it,
+register acceptance or factory preset programming remains unknown: a visual
+no-change alone is not a measured register readback or proof of panel damage.
+
+### Current verification
+
+The production-method host recorder tests both orientations, inactive output,
+and immediate exit. It checks initial held-A consumption, no hold-repeat,
+1→2→3→4→1 wrap, B priority over simultaneous A, correct visible labels, unchanged
+pattern words between selections, exact GAMSET masks, fixed F0, and restoration
+of selector01/F0/black on exit. Input polling releases SPI and yields between
+reads; there is no new worker, heap allocation or settings write.
+
+All 57 host cases pass (48 startup, five initialization, four interactive
+framebuffer cases). The ESP32-S3 display translation unit passes real-header
+syntax-only checking. Changed production files pass clang-format and scoped
+cppcheck with the documented existing findings suppressed. All four numbered
+source-framebuffer previews were inspected; this verifies layout, not the
+physical gamma response. Full repository checks retain the same 143 formatting
+diagnostics and 12 normalized static-analysis findings as the baseline. No
+firmware build or device-button test was performed.
+
+The following sections retain the reference investigation and earlier tests as
+history; their timed/stacked pattern procedures are superseded by this section.
 
 ## Evidence and scope
 
@@ -179,7 +248,7 @@ needed for the raw test. Normal startup resumes automatically.
   12 normalized static-analysis findings as the base; no unrelated fixes included.
 - No firmware build or flash.
 
-## Current test: RGB565 expansion A/B (EPF)
+## Previous test: RGB565 expansion A/B (EPF)
 
 The first raw-pattern test retained the leap above black. Anton subsequently
 checked Doom and no longer considers the apparent tonal improvement reliable.

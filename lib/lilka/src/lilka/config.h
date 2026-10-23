@@ -8,7 +8,7 @@
 #define LILKA_INDEPENDENT_BACKLIGHT 0
 #endif
 
-// Isolated branch: show a direct native RGB565 pattern for 20 seconds at boot.
+// Isolated branch: direct native RGB565 diagnostic; A cycles, B exits.
 #ifndef LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC
 #define LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC 1
 #endif

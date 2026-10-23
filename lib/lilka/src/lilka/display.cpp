@@ -19,6 +19,9 @@
 #    include <freertos/FreeRTOS.h>
 #    include <freertos/task.h>
 #endif
+#if LILKA_VERSION == 2 && LILKA_NATIVE_PANEL_RAW_DIAGNOSTIC
+#    include "controller.h"
+#endif
 
 namespace lilka {
 
@@ -105,22 +108,20 @@ void Display::showNativeGrayDiagnostic() {
         serial.log("RAW565 diagnostic skipped: native output inactive");
         return;
     }
-    serial.log("RAW565 EPF A/B: upper F0, lower E0; identical input words, 20 seconds");
+    serial.log("RAW565 gamma test: A cycles presets 1/2/3/4; B restores and exits");
     const int16_t panelWidth = Arduino_ST7789::width();
     const int16_t panelHeight = Arduino_ST7789::height();
-    // RAMCTRL EPF converts incoming RGB565 words into the panel's 18-bit RAM.
-    // The two halves keep identical source words, but use different expansion.
-    // Only EPF0 changes: F0 (green-bit copy) versus E0 (own-channel MSB copy).
-    for (int band = 0; band < 10; ++band) {
-        const int row = band % 5;
-        if (row == 0) {
-            _bus->beginWrite();
-            _bus->writeC8D16(0xB0, band == 0 ? 0x00F0 : 0x00E0);
-            _bus->endWrite();
-        }
+    constexpr int16_t headerHeight = 20;
+    const int16_t patternHeight = panelHeight - headerHeight;
+    // Fix input expansion at the original F0 mode throughout this test.
+    // Only GAMSET changes between stages; do not combine gamma and EPF tests.
+    _bus->beginWrite();
+    _bus->writeC8D16(0xB0, 0x00F0);
+    _bus->endWrite();
+    for (int row = 0; row < 5; ++row) {
         const int columns = row == 0 ? 16 : 32;
-        const int16_t top = band * panelHeight / 10;
-        const int16_t bottom = (band + 1) * panelHeight / 10;
+        const int16_t top = headerHeight + row * patternHeight / 5;
+        const int16_t bottom = headerHeight + (row + 1) * patternHeight / 5;
         for (int column = 0; column < columns; ++column) {
             uint16_t color = 0;
             if (row < 2) {
@@ -138,17 +139,52 @@ void Display::showNativeGrayDiagnostic() {
             const int16_t right = (column + 1) * panelWidth / columns;
             _bus->beginWrite();
             Arduino_ST7789::writeAddrWindow(left, top, right - left, bottom - top);
-            // writeRepeat uses the existing polling bus, not PixelDMABus::writePixels.
-            // Call the native address method explicitly to bypass Display routing.
             _bus->writeRepeat(color, static_cast<uint32_t>(right - left) * (bottom - top));
             _bus->endWrite();
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
-    vTaskDelay(pdMS_TO_TICKS(20000));
+    // Datasheet GAMSET masks: 01=G2.2, 02=G1.8, 04=G2.5, 08=G1.0.
+    // Numerals use direct native writes too; never invoke routed text drawing.
+    static const uint8_t digits[4][5] = {
+        {0x02, 0x06, 0x02, 0x02, 0x07},
+        {0x07, 0x01, 0x07, 0x04, 0x07},
+        {0x07, 0x01, 0x07, 0x01, 0x07},
+        {0x05, 0x05, 0x07, 0x01, 0x01},
+    };
+    controller.getState(); // Consume button edges accumulated during startup.
+    unsigned stage = 0;
+    bool finished = false;
+    while (!finished) {
+        _bus->beginWrite();
+        _bus->writeC8D8(0x26, 1U << stage);
+        Arduino_ST7789::writeAddrWindow(0, 0, panelWidth, headerHeight);
+        _bus->writeRepeat(colors::Black, static_cast<uint32_t>(panelWidth) * headerHeight);
+        for (int y = 0; y < 5; ++y) {
+            for (int x = 0; x < 3; ++x) {
+                if (digits[stage][y] & (1U << (2 - x))) {
+                    Arduino_ST7789::writeAddrWindow(4 + x * 3, 2 + y * 3, 3, 3);
+                    _bus->writeRepeat(0xFFFF, 9);
+                }
+            }
+        }
+        _bus->endWrite();
+        while (true) {
+            const auto input = controller.getState();
+            if (input.b.justPressed) {
+                finished = true;
+                break;
+            }
+            if (input.a.justPressed) {
+                stage = (stage + 1) % 4;
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
     _bus->beginWrite();
-    // Restore the pre-test reset-default expansion before normal Keira drawing.
-    // EPF changes the conversion at write time, not pixels already in panel RAM.
+    // Restore the reset-default gamma selector and expansion before Keira.
+    _bus->writeC8D8(0x26, 0x01);
     _bus->writeC8D16(0xB0, 0x00F0);
     Arduino_ST7789::writeAddrWindow(0, 0, panelWidth, panelHeight);
     _bus->writeRepeat(colors::Black, static_cast<uint32_t>(panelWidth) * panelHeight);
