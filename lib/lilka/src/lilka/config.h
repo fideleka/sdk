@@ -8,6 +8,12 @@
 #define LILKA_INDEPENDENT_BACKLIGHT 0
 #endif
 
+// Diagnostic only: preserve native ST7789 reset-default gamma/drive settings.
+// This does not change the external display driver or persist panel settings.
+#ifndef LILKA_NATIVE_PANEL_RESET_DEFAULTS
+#define LILKA_NATIVE_PANEL_RESET_DEFAULTS 1
+#endif
+
 #ifndef LILKA_CONFIG_H
 #define LILKA_CONFIG_H
 

@@ -15,6 +15,11 @@
 #include <cstring>
 #include <esp_heap_caps.h>
 
+#if LILKA_VERSION == 2 && LILKA_NATIVE_PANEL_RESET_DEFAULTS
+#    include <freertos/FreeRTOS.h>
+#    include <freertos/task.h>
+#endif
+
 namespace lilka {
 
 template class GFX<Display>;
@@ -61,6 +66,26 @@ void Display::begin() {
     setUTF8Print(true);
     serial.log("display ok");
 }
+
+#if LILKA_VERSION == 2 && LILKA_NATIVE_PANEL_RESET_DEFAULTS
+void Display::tftInit() {
+    // Native v2 has no GPIO-controlled reset. Reset before selecting the
+    // standard interface; do not write generic gamma or analog drive values.
+    // Arduino_TFT::begin applies the existing rotation and address offsets next.
+    _bus->sendCommand(ST7789_SWRESET);
+    vTaskDelay(pdMS_TO_TICKS(ST7789_RST_DELAY));
+    _bus->sendCommand(ST7789_SLPOUT);
+    vTaskDelay(pdMS_TO_TICKS(ST7789_SLPOUT_DELAY));
+    _bus->beginWrite();
+    _bus->writeC8D8(ST7789_COLMOD, 0x55);
+    _bus->endWrite();
+    Arduino_ST7789::invertDisplay(false); // Preserve the native IPS inversion convention.
+    _bus->sendCommand(ST7789_NORON);
+    vTaskDelay(pdMS_TO_TICKS(10));
+    _bus->sendCommand(ST7789_DISPON);
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+#endif
 
 bool Display::enablePixelDMA() {
 #if LILKA_VERSION == 2 && CONFIG_IDF_TARGET_ESP32S3
