@@ -83,6 +83,15 @@ int main(int argc,char** argv){
  now+=30000;displaySettings.serviceIdle(true);assert(lilka::brightness.isDimmed());
  now+=30000;displaySettings.serviceIdle(true);assert(displaySettings.isSleeping());
  assert(displaySettings.serviceIdle(false)&&!displaySettings.isSleeping());
+ // Automatic frames in an exempt game must not expire either saved timer,
+ // even with long loading gaps or no button input. Saved choices stay intact.
+ const auto offBefore=offCalls;
+ const unsigned gaps[]={16u,30000u,60000u,3600001u};
+ for(unsigned gap:gaps){
+  now+=gap;displaySettings.serviceIdle(false);
+  assert(!displaySettings.isSleeping()&&!lilka::brightness.isDimmed()&&offCalls==offBefore);
+  assert(displaySettings.getTimeoutSeconds()==60&&displaySettings.getDimTimeoutSeconds()==30);
+ }
  displaySettings.setDimTimeoutSeconds(0);
  // Held keys continuously renew inactivity, independently of event consumption.
  displaySettings.setTimeoutSeconds(1);

@@ -255,6 +255,11 @@ public:
     void serviceOutputPower();
     void displayOn() override;
     void displayOff() override;
+    /// RAM-only automatic-frame idle policy. Set before startup or on the LCD owner task.
+    /// Games/loading may disable it without changing the user's saved dim/off timers.
+    void setIdleEligible(bool eligible) {
+        idleEligible = eligible;
+    }
     void beginFrame();
     void endFrame();
     void startWrite() override;
@@ -355,6 +360,7 @@ private:
     Canvas* routedCanvas = nullptr;
     bool layeredPresentation = false, routingDirty = false, nativeBypass = false, nativeWrite = true,
          routingStarted = false, routingAllocationFailed = false, nativePanelOn = true;
+    bool idleEligible = true;
     unsigned frameDepth = 0, writeDepth = 0;
     int16_t windowX = 0, windowY = 0;
     uint16_t windowWidth = 0, windowHeight = 0;

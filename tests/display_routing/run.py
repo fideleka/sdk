@@ -47,7 +47,7 @@ struct MockDevices {
     bool capture(Canvas*,Canvas*c,const VolumeOverlaySnapshot&,bool){assert(c);++captures;published=c->pixels;return true;}
 };
 extern MockDevices devices;
-struct MockSettings { bool sleeping=false; bool isSleeping()const{return sleeping;} void serviceIdle(bool){} };
+struct MockSettings { bool sleeping=false; bool isSleeping()const{return sleeping;} unsigned calls=0;bool eligible=true;void serviceIdle(bool value){++calls;eligible=value;} };
 extern MockSettings displaySettings;
 struct MockAudio {VolumeOverlaySnapshot getVolumeOverlay(){return {};}};
 extern MockAudio audio;
@@ -92,6 +92,7 @@ public:
 private:
     Canvas*routedCanvas=nullptr;
     bool layeredPresentation=false,routingDirty=false,nativeBypass=false,nativeWrite=true,routingStarted=false,routingAllocationFailed=false,nativePanelOn=true;
+    bool idleEligible=true;
     unsigned frameDepth=0,writeDepth=0;
     int16_t windowX=0,windowY=0;uint16_t windowWidth=0,windowHeight=0;
     uint32_t windowOffset=0,routeGeneration=0;
@@ -99,6 +100,10 @@ private:
 };
 }
 '''
+header = (source/'display.h').read_text()
+setter_start = header.index('    void setIdleEligible(')
+setter_end = header.index('\n    }', setter_start) + len('\n    }')
+mock = mock.replace('    void startWrite()override;void endWrite()override;', header[setter_start:setter_end] + '\n    void startWrite()override;void endWrite()override;')
 checks = r'''
 #include "display.h"
 namespace lilka { uint32_t now=0;MockDevices devices;MockSettings displaySettings;MockAudio audio;MockBrightness brightness; }
@@ -131,6 +136,16 @@ int main(){using namespace lilka;
  devices.internal=true;devices.sleeping=true;displaySettings.sleeping=true;
  const auto writes=output.writes;output.beginFrame();output.draw16bitRGBBitmap(0,0,pixels,3,2);output.endFrame();assert(output.writes==writes);
  devices.sleeping=false;displaySettings.sleeping=false;++devices.generation;output.beginFrame();output.endFrame();assert(output.native[280+2]==6);
+ // Doom's startup, loading, gameplay and paused/static frames remain ineligible,
+ // including a frame after a gap longer than any saved timeout. Nested frames
+ // service timers once, and re-enabling the policy restores the default behavior.
+ output.setIdleEligible(false);
+ for(unsigned gap:{16u,30000u,60000u,3600001u}){
+  now+=gap;auto calls=displaySettings.calls;
+  output.beginFrame();output.beginFrame();output.endFrame();output.endFrame();
+  assert(displaySettings.calls==calls+1&&!displaySettings.eligible);
+ }
+ output.setIdleEligible(true);output.beginFrame();output.endFrame();assert(displaySettings.eligible);
  // Shared-compositor path avoids a third retained framebuffer and recursive capture.
  output.setLayeredPresentation(true);const auto captures=devices.captures;
  output.presentNativePixels(0,0,pixels,3,2);assert(devices.captures==captures&&output.native[280+2]==6);

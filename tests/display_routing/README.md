@@ -2,6 +2,8 @@
 
 - `python3 tests/display_routing/run.py` exercises the production routing code with
   deterministic native-LCD/Canvas peripherals (normal and ASan/UBSan).
+  It also compiles the public idle-policy setter and checks that automatic frames
+  honor the game's exemption, including nested frames and long loading gaps.
 - `python3 tests/display_routing/text.py` compiles the installed, read-only
   Arduino_GFX implementation and a real U8g2 Cyrillic font with production
   `Display::drawChar`. Only pixel sinks and Arduino hardware/Print primitives
