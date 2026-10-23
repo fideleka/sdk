@@ -72,6 +72,23 @@ bool Display::enablePixelDMA() {
 #endif
 }
 
+#if LILKA_VERSION == 2
+void Display::tftInit() {
+    Arduino_ST7789::tftInit();
+    // Preserve GFX 1.6.0 gamma except the device-verified shadow anchors:
+    // V61P/N: 0x1D -> 0x35, V62P/N: 0x21 -> 0x37. V63 stays unchanged.
+    // The native IPS panel's visible black end is the high-index table end.
+    uint8_t positive[14] = {0xF0, 0x09, 0x13, 0x12, 0x12, 0x2B, 0x3C, 0x44, 0x4B, 0x1B, 0x18, 0x17, 0x35, 0x37};
+    uint8_t negative[14] = {0xF0, 0x09, 0x13, 0x0C, 0x0D, 0x27, 0x3B, 0x44, 0x4D, 0x0B, 0x17, 0x17, 0x35, 0x37};
+    _bus->beginWrite();
+    _bus->writeCommand(0xE0);
+    _bus->writeBytes(positive, sizeof(positive));
+    _bus->writeCommand(0xE1);
+    _bus->writeBytes(negative, sizeof(negative));
+    _bus->endWrite();
+}
+#endif
+
 void Display::showStartupScreen() {
     if (splash != NULL) {
         uint16_t row[display.width()];
