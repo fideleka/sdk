@@ -4,9 +4,11 @@
   deterministic native-LCD/Canvas peripherals (normal and ASan/UBSan).
 - `python3 tests/display_routing/text.py` compiles the installed, read-only
   Arduino_GFX implementation and a real U8g2 Cyrillic font with production
-  `Display::drawChar`. Only pixel sinks and Arduino hardware/Print primitives
+  `Display::drawChar` and buffer `write`. Only pixel sinks and Arduino hardware/Print primitives
   are simulated. It checks ASCII/UTF8, two text scales, transparent/opaque text,
   native-plus-external equivalence and external-only native-write suppression.
+  A complete string must publish once, not once per glyph. Nested caller frames
+  combine multiple writes, and split UTF-8 buffers retain decoder state.
   Both normal and ASan/UBSan executables run; no firmware build or downloads.
 
 The text test deliberately poisons the retained Canvas's unprepared U8g2 decoder
