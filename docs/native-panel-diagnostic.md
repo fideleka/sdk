@@ -10,8 +10,13 @@ The owner’s EPF comparison photo shows reduced alternating tint in the E0
 green row, but the large initial brightness jump persists in both halves.
 Treat the conversion issue separately; the main tonal defect remains unresolved.
 
+Owner result with GAMSET: presets 2 and 4 improve the transition; 4 is best but
+the darkest overall. This is evidence of an output-curve effect, not proof of a
+complete fix or measured panel gamma. Check retained detail, not darkness alone.
+
 The current diagnostic draws one unchanged raw RGB565 pattern, with a visible
-preset number in a black header. **Press A to cycle; press B to exit.** There
+larger preset number centered in a 28-pixel black header, away from the rounded
+corners. **A cycles; B restores and exits; C keeps the selection and exits.** There
 is no timeout or automatic advancement. Holding A does not repeat. The order is
 1 → 2 → 3 → 4 → 1, and each curve stays active until another button press.
 
@@ -32,6 +37,11 @@ The dark/full-gray/red/green/blue pixel pattern is written once through the
 native polling bus. Later stages change only GAMSET and the number in the header.
 No decoded media, routing or pixel DMA is used. On B, the test restores selector
 01 and F0, clears black, and continues into Keira. No NVS settings are written.
+On C, it does not restore the gamma selector: the chosen curve remains active
+in Keira for this boot. It still restores F0 and clears the diagnostic pattern.
+The next panel reinitialization resets the selection; no persistent key exists.
+Launching a separately built Doom firmware may reinitialize the panel, so this
+Keira test does not prove the curve will remain active in Doom.
 The external screen is not drawn to. External-only output skips the test.
 
 ### Exact command and observations
@@ -41,11 +51,12 @@ The external screen is not drawn to. External-only output skips the test.
 ```
 
 Select only Keira with N, then 1, then Enter; accept its existing upload prompt.
-At startup press A to compare the four numbered presets. Report which numbers
-change the midtones and whether any reduces the initial jump. Photograph the
-whole screen at useful numbers; there is no need to hurry or navigate to a PNG.
-Press B when finished. Normal Keira/Doom afterward uses the restored selector,
-not whichever diagnostic number was last visible.
+At startup use A to select 4, then C to enter Keira with curve 4 active. Open
+`shadow-reference.png` from SD and check whether the first dark steps separate
+better without losing the remaining shadow detail. Keep brightness and viewing
+conditions unchanged. B instead exits with the original selector restored.
+The labels now sit at the top center, not under the rounded corner. Nothing is
+saved, so restarting repeats the diagnostic from preset 1.
 
 If curves visibly change the image, curve selection affects the panel output;
 judge the first step separately from midtone changes. If none changes it,
@@ -55,13 +66,13 @@ no-change alone is not a measured register readback or proof of panel damage.
 ### Current verification
 
 The production-method host recorder tests both orientations, inactive output,
-and immediate exit. It checks initial held-A consumption, no hold-repeat,
-1→2→3→4→1 wrap, B priority over simultaneous A, correct visible labels, unchanged
+immediate B exit and C retention of preset4. It checks initial held-A consumption, no hold-repeat,
+1→2→3→4→1 wrap, B priority over simultaneous A/C, correct centered labels, unchanged
 pattern words between selections, exact GAMSET masks, fixed F0, and restoration
 of selector01/F0/black on exit. Input polling releases SPI and yields between
 reads; there is no new worker, heap allocation or settings write.
 
-All 57 host cases pass (48 startup, five initialization, four interactive
+All 59 host cases pass (48 startup, five initialization, six interactive
 framebuffer cases). The ESP32-S3 display translation unit passes real-header
 syntax-only checking. Changed production files pass clang-format and scoped
 cppcheck with the documented existing findings suppressed. All four numbered

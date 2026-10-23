@@ -108,10 +108,10 @@ void Display::showNativeGrayDiagnostic() {
         serial.log("RAW565 diagnostic skipped: native output inactive");
         return;
     }
-    serial.log("RAW565 gamma test: A cycles presets 1/2/3/4; B restores and exits");
+    serial.log("RAW565 gamma test: A cycles; B restores; C keeps selected curve for this boot");
     const int16_t panelWidth = Arduino_ST7789::width();
     const int16_t panelHeight = Arduino_ST7789::height();
-    constexpr int16_t headerHeight = 20;
+    constexpr int16_t headerHeight = 28;
     const int16_t patternHeight = panelHeight - headerHeight;
     // Fix input expansion at the original F0 mode throughout this test.
     // Only GAMSET changes between stages; do not combine gamma and EPF tests.
@@ -155,6 +155,7 @@ void Display::showNativeGrayDiagnostic() {
     controller.getState(); // Consume button edges accumulated during startup.
     unsigned stage = 0;
     bool finished = false;
+    bool keepGamma = false;
     while (!finished) {
         _bus->beginWrite();
         _bus->writeC8D8(0x26, 1U << stage);
@@ -163,8 +164,8 @@ void Display::showNativeGrayDiagnostic() {
         for (int y = 0; y < 5; ++y) {
             for (int x = 0; x < 3; ++x) {
                 if (digits[stage][y] & (1U << (2 - x))) {
-                    Arduino_ST7789::writeAddrWindow(4 + x * 3, 2 + y * 3, 3, 3);
-                    _bus->writeRepeat(0xFFFF, 9);
+                    Arduino_ST7789::writeAddrWindow((panelWidth - 12) / 2 + x * 4, 4 + y * 4, 4, 4);
+                    _bus->writeRepeat(0xFFFF, 16);
                 }
             }
         }
@@ -172,6 +173,11 @@ void Display::showNativeGrayDiagnostic() {
         while (true) {
             const auto input = controller.getState();
             if (input.b.justPressed) {
+                finished = true;
+                break;
+            }
+            if (input.c.justPressed) {
+                keepGamma = true;
                 finished = true;
                 break;
             }
@@ -183,8 +189,9 @@ void Display::showNativeGrayDiagnostic() {
         }
     }
     _bus->beginWrite();
-    // Restore the reset-default gamma selector and expansion before Keira.
-    _bus->writeC8D8(0x26, 0x01);
+    // B restores the reset selector; C retains only this boot's selection.
+    // No NVS setting is written. Normal reinitialization restores the default.
+    if (!keepGamma) _bus->writeC8D8(0x26, 0x01);
     _bus->writeC8D16(0xB0, 0x00F0);
     Arduino_ST7789::writeAddrWindow(0, 0, panelWidth, panelHeight);
     _bus->writeRepeat(colors::Black, static_cast<uint32_t>(panelWidth) * panelHeight);

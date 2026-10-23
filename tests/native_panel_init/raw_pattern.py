@@ -17,6 +17,7 @@ MOCK = r'''
 #include <cstdlib>
 #include <set>
 #include <vector>
+constexpr int headerHeight=28;
 inline int panelWidth=280,panelHeight=240,left=0,top=0,rectWidth=0,rectHeight=0;
 inline bool active=true,transaction=false;
 inline unsigned writes=0,stages=0,expansion=0xf0,gammaMask=1,inputCase=0,inputIndex=0;
@@ -31,27 +32,28 @@ inline void observeFrame(){
  assert(stages<5&&gammaMask==(1u<<(stages%4)));
  assert(expansion==0xf0&&modes==std::vector<unsigned>({0xf0}));
  const int rows[]={16,32,32,32,32};
- const int patternHeight=panelHeight-20;
+ const int patternHeight=panelHeight-headerHeight;
  for(int row=0;row<5;++row){
   std::set<uint16_t> distinct;
-  int y=20+(row*patternHeight/5+(row+1)*patternHeight/5)/2;
+  int y=headerHeight+(row*patternHeight/5+(row+1)*patternHeight/5)/2;
   for(int x=0;x<panelWidth;++x)distinct.insert(pixels[y*panelWidth+x]);
   assert(distinct.size()==static_cast<unsigned>(rows[row]));
   assert(pixels[y*panelWidth]==0);
  }
- for(int y=20;y<panelHeight;++y)for(int x=0;x<panelWidth;++x)
+ for(int y=headerHeight;y<panelHeight;++y)for(int x=0;x<panelWidth;++x)
   assert(covered[y*panelWidth+x]==1);
- assert(pixels[20*panelWidth+panelWidth/16]==0x0020);
- assert(pixels[(20+2*patternHeight/5)*panelWidth+panelWidth-1]==0xf800);
- assert(pixels[(20+3*patternHeight/5)*panelWidth+panelWidth-1]==0x03e0);
- assert(pixels[(20+4*patternHeight/5)*panelWidth+panelWidth-1]==0x001f);
- std::vector<uint16_t> pattern(pixels.begin()+20*panelWidth,pixels.end());
+ assert(pixels[headerHeight*panelWidth+panelWidth/16]==0x0020);
+ assert(pixels[(headerHeight+2*patternHeight/5)*panelWidth+panelWidth-1]==0xf800);
+ assert(pixels[(headerHeight+3*patternHeight/5)*panelWidth+panelWidth-1]==0x03e0);
+ assert(pixels[(headerHeight+4*patternHeight/5)*panelWidth+panelWidth-1]==0x001f);
+ std::vector<uint16_t> pattern(pixels.begin()+headerHeight*panelWidth,pixels.end());
  if(!stages)firstPattern=pattern;
  else assert(pattern==firstPattern);
  const unsigned labels[4][5]={{2,6,2,2,7},{7,1,7,4,7},{7,1,7,1,7},{5,5,7,1,1}};
- for(int y=0;y<20;++y)for(int x=0;x<panelWidth;++x){
-  bool lit=x>=4&&x<13&&y>=2&&y<17&&
-   (labels[stages%4][(y-2)/3]&(1u<<(2-(x-4)/3)));
+ for(int y=0;y<headerHeight;++y)for(int x=0;x<panelWidth;++x){
+  const int digitLeft=(panelWidth-12)/2;
+  bool lit=x>=digitLeft&&x<digitLeft+12&&y>=4&&y<24&&
+   (labels[stages%4][(y-4)/4]&(1u<<(2-(x-digitLeft)/4)));
   assert(pixels[y*panelWidth+x]==(lit?0xffff:0));
  }
  const char* output=std::getenv("RAW_PATTERN_PPM");
@@ -72,20 +74,25 @@ inline void observeFrame(){
 namespace lilka {
 namespace colors{constexpr uint16_t Black=0;}
 struct Button{bool justPressed=false;};
-struct Input{Button a,b;};
+struct Input{Button a,b,c;};
 struct Controller{
- bool oldA=false,oldB=false;
+ bool oldA=false,oldB=false,oldC=false;
  Input getState(){
   observeFrame();
-  static const bool normal[][2]={
-   {true,false},{true,false},{false,false},{true,false},
-   {true,false},{false,false},{true,false},{false,false},
-   {true,false},{false,false},{true,false},{false,false},{true,true}};
-  static const bool early[][2]={{false,false},{false,true}};
-  const unsigned size=inputCase?2:13;assert(inputIndex<size);
-  const auto& next=inputCase?early[inputIndex++]:normal[inputIndex++];
+  static const bool normal[][3]={
+   {true,false,false},{true,false,false},{false,false,false},{true,false,false},
+   {true,false,false},{false,false,false},{true,false,false},{false,false,false},
+   {true,false,false},{false,false,false},{true,false,false},{false,false,false},{true,true,true}};
+  static const bool early[][3]={{false,false,false},{false,true,false}};
+  static const bool keep[][3]={
+   {false,false,false},{true,false,false},{false,false,false},{true,false,false},
+   {false,false,false},{true,false,false},{false,false,false},{false,false,true}};
+  const unsigned size=inputCase==2?8:(inputCase==1?2:13);assert(inputIndex<size);
+  const auto& next=inputCase==2?keep[inputIndex++]:
+   (inputCase==1?early[inputIndex++]:normal[inputIndex++]);
   Input result;result.a.justPressed=next[0]&&!oldA;result.b.justPressed=next[1]&&!oldB;
-  oldA=next[0];oldB=next[1];return result;
+  result.c.justPressed=next[2]&&!oldC;
+  oldA=next[0];oldB=next[1];oldC=next[2];return result;
  }
 };
 inline Controller controller;
@@ -134,10 +141,12 @@ int main(int argc,char**argv){
  covered.assign(pixels.size(),0);
  lilka::Display display;display.showNativeGrayDiagnostic();assert(!transaction);
  if(active){
-  assert(stages==(inputCase?1u:5u)&&expansion==0xf0&&gammaMask==1);
-  assert(inputIndex==(inputCase?2u:13u));
+  assert(stages==(inputCase==2?4u:(inputCase==1?1u:5u))&&expansion==0xf0);
+  assert(gammaMask==(inputCase==2?8u:1u));
+  assert(inputIndex==(inputCase==2?8u:(inputCase==1?2u:13u)));
   assert(modes==std::vector<unsigned>({0xf0,0xf0}));
-  assert(gammas==(inputCase?std::vector<unsigned>({1,1}):std::vector<unsigned>({1,2,4,8,1,1})));
+  assert(gammas==(inputCase==2?std::vector<unsigned>({1,2,4,8}):
+   (inputCase==1?std::vector<unsigned>({1,1}):std::vector<unsigned>({1,2,4,8,1,1}))));
   for(uint16_t pixel:pixels)assert(pixel==0);
  }else{
   assert(!stages&&!writes&&modes.empty()&&gammas.empty());
@@ -154,7 +163,8 @@ with tempfile.TemporaryDirectory(prefix='lilka-raw-pattern-') as temporary:
                     '-fsanitize=address,undefined', '-fno-pie', '-no-pie',
                     str(cpp), '-o', str(binary)], check=True)
     for width, height, active, input_case in (
-        (280, 240, 1, 0), (240, 280, 1, 0), (280, 240, 0, 0), (280, 240, 1, 1)
+        (280, 240, 1, 0), (240, 280, 1, 0), (280, 240, 0, 0), (280, 240, 1, 1),
+        (280, 240, 1, 2), (240, 280, 1, 2)
     ):
         subprocess.run([str(binary), str(width), str(height), str(active), str(input_case)], check=True)
-print('PASS: A cycles/wraps without hold-repeat, boot edge consumed, B wins/exits, labels/pattern/F0/restoration, inactive skip')
+print('PASS: A cycles/wraps without hold-repeat, boot edge consumed, B restores/wins, C keeps preset4, centered labels, fixed pattern/F0, inactive skip')
