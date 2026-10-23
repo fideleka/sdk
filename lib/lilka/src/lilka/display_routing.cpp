@@ -65,7 +65,7 @@ void Display::serviceOutputPower() {
 }
 void Display::beginFrame() {
     if (!frameDepth) {
-        if (!layeredPresentation) displaySettings.serviceIdle(true);
+        if (!layeredPresentation) displaySettings.serviceIdle(idleEligible);
         serviceOutputPower();
     }
     ++frameDepth;
