@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import sys
+import os
 
 root = Path(__file__).resolve().parents[2]
 sources = root / "lib/lilka/src/lilka"
@@ -45,6 +46,7 @@ inline unsigned frameAllocations=0, failFrameAllocation=0;
 inline std::function<void()> duringDma;
 inline int busError=0,deviceError=0;
 inline unsigned fakeTime=1000, resetCount=0, starts=0;
+inline unsigned busInitializations=0, deviceRemovals=0, nvsAttempts=0, busFailures=0;
 inline const void* inFlight=nullptr;
 inline std::map<std::string,std::vector<uint8_t>> nvm;
 inline void* heap_caps_malloc(size_t n,int caps){if(n>=134400 && ++frameAllocations==failFrameAllocation)return nullptr;if((failFrame && n>=134400)||(failDma&&n==8192))return nullptr;void*p=std::malloc(n);if(p)allocations[p]=n;return p;}
@@ -86,7 +88,7 @@ public:
  bool isKey(const char*k){return nvm.count(k);}
  size_t getBytesLength(const char*k){return nvm[k].size();}
  size_t getBytes(const char*k,void*p,size_t n){n=std::min(n,nvm[k].size());std::memcpy(p,nvm[k].data(),n);return n;}
- size_t putBytes(const char*k,const void*p,size_t n){if(failNvs)return 0;nvm[k]=std::vector<uint8_t>((const uint8_t*)p,(const uint8_t*)p+n);return n;}
+ size_t putBytes(const char*k,const void*p,size_t n){++nvsAttempts;if(failNvs)return 0;nvm[k]=std::vector<uint8_t>((const uint8_t*)p,(const uint8_t*)p+n);return n;}
  uint8_t getUChar(const char*k,uint8_t d){return nvm.count(k)&&nvm[k].size()?nvm[k][0]:d;}
  size_t putUChar(const char*k,uint8_t v){return putBytes(k,&v,1);}
  String getString(const char*k,const char*d){return nvm.count(k)?String((const char*)nvm[k].data()):String(d);}
@@ -139,10 +141,10 @@ using spi_device_handle_t=void*;
 struct spi_bus_config_t{int mosi_io_num,miso_io_num,sclk_io_num,quadwp_io_num,quadhd_io_num,data4_io_num,data5_io_num,data6_io_num,data7_io_num,max_transfer_sz;};
 struct spi_device_interface_config_t{int clock_speed_hz,spics_io_num,queue_size;};
 struct spi_transaction_t{unsigned length;const void*tx_buffer;};
-inline int spi_bus_initialize(int host,spi_bus_config_t*b,int){assert(host==2);assert(b->miso_io_num==-1&&b->quadwp_io_num==-1&&b->quadhd_io_num==-1&&b->data4_io_num==-1&&b->data5_io_num==-1&&b->data6_io_num==-1&&b->data7_io_num==-1);if(busError)return busError;if(busBusy)return -1;busBusy=true;return 0;}
+inline int spi_bus_initialize(int host,spi_bus_config_t*b,int){++busInitializations;assert(host==2);if(busFailures){--busFailures;return ESP_ERR_INVALID_STATE;}assert(b->miso_io_num==-1&&b->quadwp_io_num==-1&&b->quadhd_io_num==-1&&b->data4_io_num==-1&&b->data5_io_num==-1&&b->data6_io_num==-1&&b->data7_io_num==-1);if(busError)return busError;if(busBusy)return -1;busBusy=true;return 0;}
 inline int openedClock=0;
 inline int spi_bus_add_device(int,spi_device_interface_config_t*config,spi_device_handle_t*p){if(deviceError)return deviceError;openedClock=config->clock_speed_hz;*p=(void*)1;return 0;}
-inline int spi_bus_remove_device(void*){return 0;}
+inline int spi_bus_remove_device(void*){++deviceRemovals;return 0;}
 inline int spi_bus_free(int){assert(!inFlight);busBusy=false;return 0;}
 inline int submitError=0;inline bool wrongCompletion=false;
 inline std::vector<uint8_t> queuedBytes, wireBytes;
@@ -521,6 +523,85 @@ int main(int argc,char**argv){
  wireChunks.clear();assert(m.capture(nullptr,&app,overlay,false));tick();assert(!wireChunks.empty());
  m.deactivate();assert(allocations.empty());
  }
+ // Draft editing never touches hardware or NVS; Apply validates the entire pin set.
+ nvm.clear();
+ {
+ DeviceManager m;registered(m,0);assert(m.setEnabled(0,true));
+ DeviceManager::SettingsDraft draft;
+ assert(m.beginSettingsEdit(0,draft));
+ assert(draft.count==10&&draft.schema==m.slots[0].schema);
+ for(unsigned field=0;field<draft.count;++field){
+  DeviceManager::SettingInfo info;assert(m.settingInfo(0,field,info));
+  assert(info.pin==(field<5));
+ }
+ const auto initialNvs=nvm;
+ auto initCount=busInitializations,removeCount=deviceRemovals,writeCount=nvsAttempts;
+ draft.values[0]=1; // Half of a Clock/MOSI swap: temporarily duplicates GPIO13.
+ DeviceManager::SettingInfo preview;
+ assert(m.previewSetting(0,0,draft,preview)&&preview.pin&&!strcmp(preview.choice,"GPIO13"));
+ assert(m.slots[0].values[0]==0&&m.slots[0].values[1]==1&&m.slots[0].active);
+ assert(busInitializations==initCount&&deviceRemovals==removeCount&&nvsAttempts==writeCount&&nvm==initialNvs);
+ assert(!m.applySettings(0,draft)); // Reject before disabling the old driver.
+ assert(m.slots[0].active&&m.slots[0].values[0]==0&&m.slots[0].values[1]==1);
+ assert(busInitializations==initCount&&deviceRemovals==removeCount&&nvsAttempts==writeCount&&nvm==initialNvs);
+ draft.values[1]=0; // The complete swap is valid: one restart, one stored record.
+ assert(m.applySettings(0,draft));
+ assert(m.slots[0].active&&m.slots[0].values[0]==1&&m.slots[0].values[1]==0);
+ assert(busInitializations==initCount+1&&deviceRemovals==removeCount+1&&nvsAttempts==writeCount+1);
+ assert(m.clkPin==13&&m.mosiPin==12);
+ // Applying unchanged values is a true no-op.
+ assert(m.beginSettingsEdit(0,draft));
+ initCount=busInitializations;removeCount=deviceRemovals;writeCount=nvsAttempts;
+ assert(m.applySettings(0,draft));
+ assert(busInitializations==initCount&&deviceRemovals==removeCount&&nvsAttempts==writeCount);
+ // Backlight conflicts, invalid ranges and stale snapshots cannot disturb live hardware.
+ draft.values[4]=1;draft.values[0]=4; // Both GPIO47.
+ assert(!m.applySettings(0,draft));
+ assert(busInitializations==initCount&&deviceRemovals==removeCount&&nvsAttempts==writeCount);
+ assert(m.beginSettingsEdit(0,draft));draft.values[0]=999;
+ assert(!m.previewSetting(0,0,draft,preview)&&!m.applySettings(0,draft));
+ assert(busInitializations==initCount&&deviceRemovals==removeCount&&nvsAttempts==writeCount);
+ assert(m.beginSettingsEdit(0,draft));
+ assert(m.changeSetting(0,6,1)); // Concurrent scalar edit invalidates the snapshot.
+ initCount=busInitializations;removeCount=deviceRemovals;writeCount=nvsAttempts;
+ assert(!m.applySettings(0,draft)&&strstr(m.slots[0].status,"reopen"));
+ assert(busInitializations==initCount&&deviceRemovals==removeCount&&nvsAttempts==writeCount);
+ // Activation failure restores old pins and leaves persistent state untouched.
+ assert(m.beginSettingsEdit(0,draft));draft.values[0]=0;draft.values[1]=1;
+ const auto beforeFailure=nvm;const auto beforeAllocations=allocations.size();
+ busFailures=1;assert(!m.applySettings(0,draft));
+ assert(m.slots[0].active&&m.clkPin==13&&m.mosiPin==12&&m.slots[0].values[0]==1&&m.slots[0].values[1]==0);
+ assert(nvm==beforeFailure&&nvsAttempts==writeCount&&allocations.size()==beforeAllocations);
+ // NVS failure after activation also restores the original hardware and values.
+ failNvs=true;assert(!m.applySettings(0,draft));failNvs=false;
+ assert(m.slots[0].active&&m.clkPin==13&&m.mosiPin==12&&m.slots[0].values[0]==1&&m.slots[0].values[1]==0);
+ assert(nvm==beforeFailure&&allocations.size()==beforeAllocations);
+ // A retry succeeds with the same draft after recovery.
+ assert(m.applySettings(0,draft));assert(m.clkPin==12&&m.mosiPin==13);
+ // If both new activation and rollback fail, stay in a safe internal fallback.
+ assert(m.beginSettingsEdit(0,draft));draft.values[0]=1;draft.values[1]=0;
+ const auto beforeDoubleFailure=nvm;busFailures=2;
+ assert(!m.applySettings(0,draft));
+ assert(!m.slots[0].active&&m.internalOutput()&&!busBusy&&nvm==beforeDoubleFailure);
+ assert(m.slots[0].values[0]==0&&m.slots[0].values[1]==1&&strstr(m.slots[0].status,"could not restart"));
+ assert(m.setEnabled(0,true));
+ // Unchanged ABI-1 choice metadata still classifies a reserved GPIO as a pin,
+ // then rejects that final assignment before touching the existing hardware.
+ const auto* originalDescriptor=m.slots[0].descriptor;
+ kd_device reserved=*originalDescriptor;
+ kd_setting definitions[KD_MAX_SETTINGS];
+ std::copy(originalDescriptor->settings,originalDescriptor->settings+originalDescriptor->setting_count,definitions);
+ const char* reservedChoices[]={"GPIO0","GPIO13","GPIO14","GPIO21","GPIO47","GPIO48"};
+ definitions[0].choices=reservedChoices;reserved.settings=definitions;m.slots[0].descriptor=&reserved;
+ assert(m.beginSettingsEdit(0,draft));
+ assert(m.previewSetting(0,0,draft,preview)&&preview.pin);
+ initCount=busInitializations;writeCount=nvsAttempts;
+ assert(!m.applySettings(0,draft)&&busInitializations==initCount&&nvsAttempts==writeCount&&m.slots[0].active);
+ m.slots[0].descriptor=originalDescriptor;
+ assert(m.setEnabled(0,false));
+ }
+ assert(allocations.empty());
+ puts("PASS: transactional pin drafts, preview/no-op, prevalidation, full swaps, one restart/save, stale rejection and rollback/fallback");
  // Restore the selected route, but Select-held recovery forces Internal.
  nvm.clear();nvm["displayMode"]={DeviceManager::Both};
  {DeviceManager m;registered(m,0);assert(m.begin(false));assert(m.displayMode()==DeviceManager::Both);assert(m.begin(false));}
@@ -555,7 +636,7 @@ with tempfile.TemporaryDirectory(prefix='keira-device-host-') as tmp:
     subprocess.run(['gcc','-std=c11','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Dmain=kd_driver_entry','-Dmemset=kd_module_memset',
                     '-c',str(root/'drivers/ili9341/driver.c'),'-o',str(tmp/'driver.o')],check=True)
     subprocess.run(['g++','-std=c++17','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',
-                    '-I'+str(tmp),'-I'+str(tmp/'lilka'),'-I'+str(root.parent/'keira/.pio/libdeps/v2/ArduinoJson/src'),
+                    '-I'+str(tmp),'-I'+str(tmp/'lilka'),'-I'+os.environ.get('ARDUINOJSON_INCLUDE', str(root.parent/'keira/.pio/libdeps/v2/ArduinoJson/src')),
                     str(tmp/'test.cpp'),str(tmp/'lilka/elfcheck.cpp'),str(tmp/'driver.o'),
                     '-o',str(tmp/'test')],check=True)
     subprocess.run([str(tmp/'test'),sys.argv[1]],check=True)

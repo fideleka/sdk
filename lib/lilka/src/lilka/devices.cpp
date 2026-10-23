@@ -97,6 +97,49 @@ bool pinAllowed(int pin) {
 bool bounded(const char* text, size_t maximum) {
     return text && strnlen(text, maximum) < maximum;
 }
+// ABI-1 pin choices already use GPIO<number>, optionally Disconnected. Infer
+// host-side metadata from that convention without changing the SD driver ABI.
+bool pinChoiceName(const char* text) {
+    if (!strcmp(text, "Disconnected")) return true;
+    if (strncmp(text, "GPIO", 4) || !text[4]) return false;
+    for (const char* p = text + 4; *p; ++p)
+        if (*p < '0' || *p > '9') return false;
+    return true;
+}
+bool pinSetting(const kd_setting& field) {
+    if (field.kind != KD_SETTING_CHOICE) return false;
+    bool hasPin = false;
+    for (int value = field.minimum; value <= field.maximum; ++value) {
+        if (!pinChoiceName(field.choices[value])) return false;
+        hasPin = hasPin || !strncmp(field.choices[value], "GPIO", 4);
+    }
+    return hasPin;
+}
+bool choicePin(const char* text, int& pin) {
+    if (!strcmp(text, "Disconnected")) {
+        pin = -1;
+        return true;
+    }
+    if (!pinChoiceName(text)) return false;
+    pin = 0;
+    for (const char* p = text + 4; *p; ++p) {
+        if (pin > 48) return false;
+        pin = pin * 10 + (*p - '0');
+    }
+    return pinAllowed(pin);
+}
+bool describeSetting(const kd_setting& field, int32_t value, DeviceManager::SettingInfo& result) {
+    if (value < field.minimum || value > field.maximum) return false;
+    strlcpy(result.label, field.label, sizeof(result.label));
+    result.value = value;
+    result.minimum = field.minimum;
+    result.maximum = field.maximum;
+    result.step = field.step;
+    result.kind = field.kind;
+    result.pin = pinSetting(field);
+    strlcpy(result.choice, field.kind == KD_SETTING_CHOICE ? field.choices[value] : "", sizeof(result.choice));
+    return true;
+}
 struct LayerView {
     const uint16_t* pixels;
     int x, y, width, height;
@@ -617,18 +660,92 @@ bool DeviceManager::settingInfo(unsigned index, unsigned field, SettingInfo& res
     if (index >= deviceCount) return false;
     xSemaphoreTake(mutex, portMAX_DELAY);
     const auto& slot = slots[index];
-    bool good = slot.descriptor && field < slot.descriptor->setting_count;
+    const bool good = slot.descriptor && field < slot.descriptor->setting_count &&
+                      describeSetting(slot.descriptor->settings[field], slot.values[field], result);
+    xSemaphoreGive(mutex);
+    return good;
+}
+bool DeviceManager::beginSettingsEdit(unsigned index, SettingsDraft& draft) {
+    if (index >= deviceCount) return false;
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    const auto& slot = slots[index];
+    const bool good = slot.descriptor && !slot.readOnly;
     if (good) {
-        const auto& f = slot.descriptor->settings[field];
-        strlcpy(result.label, f.label, sizeof(result.label));
-        result.value = slot.values[field];
-        result.minimum = f.minimum;
-        result.maximum = f.maximum;
-        result.step = f.step;
-        result.kind = f.kind;
-        strlcpy(result.choice, f.kind == KD_SETTING_CHOICE ? f.choices[result.value] : "", sizeof(result.choice));
+        draft = SettingsDraft{};
+        draft.count = slot.descriptor->setting_count;
+        draft.schema = slot.schema;
+        strlcpy(draft.uuid, slot.uuid, sizeof(draft.uuid));
+        memcpy(draft.original, slot.values, sizeof(draft.original));
+        memcpy(draft.values, slot.values, sizeof(draft.values));
     }
     xSemaphoreGive(mutex);
+    return good;
+}
+bool DeviceManager::previewSetting(unsigned index, unsigned field, const SettingsDraft& draft, SettingInfo& result) {
+    if (index >= deviceCount || field >= KD_MAX_SETTINGS) return false;
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    const auto& slot = slots[index];
+    const bool good = slot.descriptor && draft.count == slot.descriptor->setting_count && draft.schema == slot.schema &&
+                      !strncmp(draft.uuid, slot.uuid, sizeof(draft.uuid)) && field < draft.count &&
+                      describeSetting(slot.descriptor->settings[field], draft.values[field], result);
+    xSemaphoreGive(mutex);
+    return good;
+}
+bool DeviceManager::applySettings(unsigned index, const SettingsDraft& draft) {
+    if (index >= deviceCount) return false;
+    xSemaphoreTake(mutex, portMAX_DELAY);
+    auto& slot = slots[index];
+    bool good = slot.descriptor && !slot.readOnly && draft.count == slot.descriptor->setting_count &&
+                draft.schema == slot.schema && !strncmp(draft.uuid, slot.uuid, sizeof(draft.uuid));
+    if (good && memcmp(draft.original, slot.values, draft.count * sizeof(int32_t))) {
+        strlcpy(slot.status, "Settings changed; reopen Pins", sizeof(slot.status));
+        good = false;
+    }
+    if (good) good = applySettingsLocked(index, draft.values);
+    xSemaphoreGive(mutex);
+    return good;
+}
+bool DeviceManager::applySettingsLocked(unsigned index, const int32_t* values) {
+    auto& slot = slots[index];
+    if (!slot.descriptor || slot.readOnly) return false;
+    uint32_t pins = 0;
+    for (unsigned field = 0; field < slot.descriptor->setting_count; ++field) {
+        const auto& definition = slot.descriptor->settings[field];
+        if (values[field] < definition.minimum || values[field] > definition.maximum) {
+            strlcpy(slot.status, "Invalid setting value", sizeof(slot.status));
+            return false;
+        }
+        if (pinSetting(definition)) {
+            int pin = -1;
+            if (!choicePin(definition.choices[values[field]], pin) || (pin >= 0 && (pins & pinBit(pin)))) {
+                strlcpy(slot.status, "Invalid or conflicting pin assignment", sizeof(slot.status));
+                return false;
+            }
+            if (pin >= 0) pins |= pinBit(pin);
+        }
+    }
+    const size_t bytes = slot.descriptor->setting_count * sizeof(int32_t);
+    if (!memcmp(values, slot.values, bytes)) return true;
+    int32_t previous[KD_MAX_SETTINGS];
+    memcpy(previous, slot.values, sizeof(previous));
+    const bool wasActive = slot.active;
+    // Disable while the old settings are still visible to the old driver.
+    if (wasActive) deactivate();
+    memcpy(slot.values, values, bytes);
+    bool good = !wasActive || activate(index);
+    if (good) good = persist(slot);
+    if (!good) {
+        char error[80];
+        strlcpy(error, slot.status, sizeof(error));
+        if (slot.active) deactivate();
+        memcpy(slot.values, previous, sizeof(previous));
+        const bool restored = !wasActive || activate(index);
+        if (restored) strlcpy(slot.status, error, sizeof(slot.status));
+        else strlcpy(slot.status, "Apply failed; previous setup could not restart", sizeof(slot.status));
+    } else if (!wasActive) {
+        strlcpy(slot.status, slot.enabled ? "Enabled, inactive" : "Disabled", sizeof(slot.status));
+    }
+    ++generation;
     return good;
 }
 bool DeviceManager::setEnabled(unsigned index, bool enabled) {
@@ -671,27 +788,18 @@ bool DeviceManager::setEnabled(unsigned index, bool enabled) {
 bool DeviceManager::changeSetting(unsigned index, unsigned field, int direction) {
     if (index >= deviceCount || !direction) return false;
     xSemaphoreTake(mutex, portMAX_DELAY);
-    auto& slot = slots[index];
+    const auto& slot = slots[index];
     bool good = slot.descriptor && !slot.readOnly && field < slot.descriptor->setting_count;
     if (good) {
-        const auto& f = slot.descriptor->settings[field];
-        const int32_t old = slot.values[field];
-        int64_t next = static_cast<int64_t>(old) + (direction > 0 ? f.step : -f.step);
-        if (next > f.maximum) next = f.minimum;
-        if (next < f.minimum) next = f.maximum;
-        slot.values[field] = next;
-        const bool wasActive = slot.active;
-        good = !wasActive || activate(index);
-        if (good) good = persist(slot);
-        if (!good) {
-            char error[80];
-            strlcpy(error, slot.status, sizeof(error));
-            slot.values[field] = old;
-            if (wasActive) activate(index);
-            strlcpy(slot.status, error, sizeof(slot.status));
-        }
+        int32_t values[KD_MAX_SETTINGS];
+        memcpy(values, slot.values, sizeof(values));
+        const auto& definition = slot.descriptor->settings[field];
+        int64_t next = static_cast<int64_t>(values[field]) + (direction > 0 ? definition.step : -definition.step);
+        if (next > definition.maximum) next = definition.minimum;
+        if (next < definition.minimum) next = definition.maximum;
+        values[field] = next;
+        good = applySettingsLocked(index, values);
     }
-    ++generation;
     xSemaphoreGive(mutex);
     return good;
 }
@@ -1185,6 +1293,15 @@ bool DeviceManager::info(unsigned, Info&) {
     return false;
 }
 bool DeviceManager::settingInfo(unsigned, unsigned, SettingInfo&) {
+    return false;
+}
+bool DeviceManager::beginSettingsEdit(unsigned, SettingsDraft&) {
+    return false;
+}
+bool DeviceManager::previewSetting(unsigned, unsigned, const SettingsDraft&, SettingInfo&) {
+    return false;
+}
+bool DeviceManager::applySettings(unsigned, const SettingsDraft&) {
     return false;
 }
 bool DeviceManager::setEnabled(unsigned, bool) {

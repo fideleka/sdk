@@ -165,3 +165,37 @@ The SDK retained direct-drawing framebuffer uses explicit PSRAM-only allocation
 (134400 bytes at 280x240). If PSRAM allocation fails, routing falls back to the
 native display instead of consuming internal RAM needed by task stacks/DMA.
 Existing application Canvas constructors retain their default allocation policy.
+
+
+Transactional pin editing
+-------------------------
+
+Keira groups driver pin choices under **Pins**. Edits change a RAM-only draft;
+no driver restart, GPIO/SPI operation or NVS write occurs while cycling values.
+**Apply** submits the complete set. **Cancel** and Back discard the draft.
+Non-pin controls retain their existing inline behavior.
+
+``beginSettingsEdit()`` snapshots device identity, schema, original values and
+editable values. ``previewSetting()`` formats draft values without applying them.
+``applySettings()`` rejects stale snapshots, out-of-range values, reserved GPIOs
+and duplicate assignments (including BLK) before disabling the live driver.
+A valid active change performs one driver restart and one record write. An
+unchanged draft is a no-op. The old settings remain visible during old-driver
+disable. Activation/save failure restores the original values and attempts to
+restore the old hardware; if recovery also fails, native output remains the
+fallback. The caller keeps the draft after a failed Apply so it can be corrected.
+
+``SettingInfo::pin`` recognizes the existing ABI-1 choice convention:
+``GPIO<number>`` choices, optionally ``Disconnected``. It does not depend on
+translated field labels. The SD-driver ABI and saved record schema are unchanged;
+existing driver modules do not need rebuilding. A disconnected optional pin does
+not claim a GPIO. The same complete-assignment validation protects scalar
+``changeSetting()`` calls before any hardware change.
+
+The host lifecycle suite covers draft/preview no-side-effects, complete pin swaps,
+one restart/save, no-op, duplicate/backlight/reserved/range rejection, stale
+snapshots, activation and NVS failures, rollback and failed-rollback fallback.
+Set ``ARDUINOJSON_INCLUDE`` when running that suite from a clean worktree without
+cached sibling Keira dependencies. The reported device panic was not independently
+reproduced or attributed to a unique cause; this change removes live intermediate
+pin configurations and tests the requested transaction contract.
