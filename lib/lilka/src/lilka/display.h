@@ -246,6 +246,10 @@ public:
     /// Почати роботу з дисплеєм.
     /// \warning Цей метод викликається автоматично при виклику `lilka::begin()`.
     void begin();
+#if LILKA_VERSION == 2 && LILKA_NATIVE_NEAR_BLACK_TEST
+    /// Compare only near-black gamma anchors against original initialization.
+    void showNativeBlackStepDiagnostic();
+#endif
     /// Enable shared SD-driver output after device discovery. Native-only apps remain allocation-free.
     bool enableRouting();
     /// Keira supplies completed layers directly; avoid a redundant retained canvas.

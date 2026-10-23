@@ -1,3 +1,8 @@
+// Isolated branch: near-black anchor A/B; A toggles, B restores, C keeps this boot.
+#ifndef LILKA_NATIVE_NEAR_BLACK_TEST
+#define LILKA_NATIVE_NEAR_BLACK_TEST 1
+#endif
+
 // Explicit opt-in: requires the 33k/10k optocoupler charging-status modification.
 #ifndef LILKA_ADC_CHARGE_STATUS
 #define LILKA_ADC_CHARGE_STATUS 0

@@ -61,6 +61,7 @@ struct Native {
 using Arduino_ST7789=Native;
 struct Display:Native {
  void begin();void setFont(int){} void setUTF8Print(bool){}
+ void showNativeBlackStepDiagnostic(){assert(events.back()==8&&!held);}
  void enableRouting(){assert(events.back()==5);assert(held);events.push_back(6);}
  void displayOff(){}void displayOn(){}
 };
@@ -114,10 +115,11 @@ with tempfile.TemporaryDirectory(prefix='lilka-display-startup-') as directory:
         path = tmp / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('#pragma once\n#include "mock.h"\n')
-    for version, modified in ((2, 1), (2, 0)):
+    for version, modified, diagnostic in ((2, 1, 0), (2, 0, 0), (2, 1, 1), (2, 0, 1)):
         command = [os.environ.get('CXX', 'g++'), '-std=c++17', '-Wall', '-Wextra', '-Werror',
                    '-fsanitize=address,undefined', '-fno-pie', '-no-pie',
                    f'-DLILKA_VERSION={version}', f'-DLILKA_INDEPENDENT_BACKLIGHT={modified}',
+                   f'-DLILKA_NATIVE_NEAR_BLACK_TEST={diagnostic}',
                    '-I' + str(tmp), *(str(tmp / f) for f in
                      ('startup.cpp', 'board.cpp', 'display_begin.cpp', 'test.cpp')),
                    '-o', str(tmp / 'test')]
@@ -125,4 +127,4 @@ with tempfile.TemporaryDirectory(prefix='lilka-display-startup-') as directory:
         for mode in range(3):
             for scenario in (0, 3, 4, 5):
                 subprocess.run([str(tmp / 'test'), str(mode), str(scenario)], check=True)
-print('Display startup: 24 sanitized mode/recovery/hardware cases passed')
+print('Display startup: 48 sanitized mode/recovery/hardware/near-black-hook cases passed')

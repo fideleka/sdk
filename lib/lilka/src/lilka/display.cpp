@@ -15,6 +15,12 @@
 #include <cstring>
 #include <esp_heap_caps.h>
 
+#if LILKA_VERSION == 2 && LILKA_NATIVE_NEAR_BLACK_TEST
+#    include "controller.h"
+#    include <freertos/FreeRTOS.h>
+#    include <freertos/task.h>
+#endif
+
 namespace lilka {
 
 template class GFX<Display>;
@@ -71,6 +77,94 @@ bool Display::enablePixelDMA() {
     return false;
 #endif
 }
+
+#if LILKA_VERSION == 2 && LILKA_NATIVE_NEAR_BLACK_TEST
+void Display::showNativeBlackStepDiagnostic() {
+    if (!devices.internalOutput()) {
+        serial.log("Near-black diagnostic skipped: native output inactive");
+        return;
+    }
+    // Exact original pinned GFX 1.6.0 tables. Only indices 1/2 may change below.
+    // Keep original initialization, expansion, inversion, drive and 80-MHz clock.
+    uint8_t positive[14] = {0xF0, 0x09, 0x13, 0x12, 0x12, 0x2B, 0x3C, 0x44, 0x4B, 0x1B, 0x18, 0x17, 0x1D, 0x21};
+    uint8_t negative[14] = {0xF0, 0x09, 0x13, 0x0C, 0x0D, 0x27, 0x3B, 0x44, 0x4D, 0x0B, 0x17, 0x17, 0x1D, 0x21};
+    const auto applyAnchors = [&](bool adjusted) {
+        positive[1] = negative[1] = adjusted ? 0x00 : 0x09;
+        positive[2] = negative[2] = adjusted ? 0x02 : 0x13;
+        _bus->beginWrite();
+        _bus->writeCommand(0xE0);
+        _bus->writeBytes(positive, sizeof(positive));
+        _bus->writeCommand(0xE1);
+        _bus->writeBytes(negative, sizeof(negative));
+        _bus->endWrite();
+    };
+    constexpr int16_t headerHeight = 28;
+    const int16_t panelWidth = Arduino_ST7789::width();
+    const int16_t panelHeight = Arduino_ST7789::height();
+    const int16_t patternHeight = panelHeight - headerHeight;
+    // Original F0 expansion copies G0 into the missing R/B bit. These words
+    // therefore give equal 6-bit R/G/B levels in panel RAM, including odd grays.
+    for (int row = 0; row < 2; ++row) {
+        const int columns = row == 0 ? 16 : 64;
+        const int16_t top = headerHeight + row * patternHeight / 2;
+        const int16_t bottom = headerHeight + (row + 1) * patternHeight / 2;
+        for (int level = 0; level < columns; ++level) {
+            const uint16_t color =
+                (static_cast<uint16_t>(level >> 1) << 11) | (static_cast<uint16_t>(level) << 5) | (level >> 1);
+            const int16_t left = level * panelWidth / columns;
+            const int16_t right = (level + 1) * panelWidth / columns;
+            _bus->beginWrite();
+            Arduino_ST7789::writeAddrWindow(left, top, right - left, bottom - top);
+            _bus->writeRepeat(color, static_cast<uint32_t>(right - left) * (bottom - top));
+            _bus->endWrite();
+        }
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    static const uint8_t digits[2][5] = {{0x02, 0x06, 0x02, 0x02, 0x07}, {0x07, 0x01, 0x07, 0x04, 0x07}};
+    controller.getState();
+    bool adjusted = false;
+    bool finished = false;
+    bool keep = false;
+    serial.log("Near-black A/B: 1 original, 2 adjusted V1/V2; A toggles, B restores, C keeps this boot");
+    while (!finished) {
+        applyAnchors(adjusted);
+        _bus->beginWrite();
+        Arduino_ST7789::writeAddrWindow(0, 0, panelWidth, headerHeight);
+        _bus->writeRepeat(colors::Black, static_cast<uint32_t>(panelWidth) * headerHeight);
+        for (int y = 0; y < 5; ++y) {
+            for (int x = 0; x < 3; ++x) {
+                if (digits[adjusted ? 1 : 0][y] & (1U << (2 - x))) {
+                    Arduino_ST7789::writeAddrWindow((panelWidth - 12) / 2 + x * 4, 4 + y * 4, 4, 4);
+                    _bus->writeRepeat(0xFFFF, 16);
+                }
+            }
+        }
+        _bus->endWrite();
+        while (true) {
+            const auto input = controller.getState();
+            if (input.b.justPressed) {
+                finished = true;
+                break;
+            }
+            if (input.c.justPressed) {
+                keep = true;
+                finished = true;
+                break;
+            }
+            if (input.a.justPressed) {
+                adjusted = !adjusted;
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+    if (!keep) applyAnchors(false);
+    _bus->beginWrite();
+    Arduino_ST7789::writeAddrWindow(0, 0, panelWidth, panelHeight);
+    _bus->writeRepeat(colors::Black, static_cast<uint32_t>(panelWidth) * panelHeight);
+    _bus->endWrite();
+}
+#endif
 
 void Display::showStartupScreen() {
     if (splash != NULL) {
