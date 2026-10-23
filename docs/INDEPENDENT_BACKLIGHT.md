@@ -48,14 +48,15 @@ Setters return false on unsupported hardware or failed hardware updates. Disable
 
 ## Shared Display settings and idle-off
 
-`lilka::displaySettings.begin()` is called by Keira, Lilplayer and Doom after `lilka::begin()`. Doom runs the idle policy only in startup selection/settings menus.
+`lilka::begin()` initializes the shared display settings. Doom exempts all its screens from idle dim/off.
 
 - Public NVS constants live in `display_settings.h`: namespace `backlight`, brightness key `level`, off-timeout key `timeoutSeconds`, dim-timeout key `dimSeconds`. Both applications use these exact SDK APIs and keys, not private copies.
 - Both timers default to **Never (0)** for missing/invalid settings; valid previously saved choices are retained. Menu presets: Never (0), 30 sec, 1/2/5/10 min. API values are clamped to 0..3600 seconds; invalid stored values fall back to Never.
 - `getTimeoutSeconds()` reads RAM; `setTimeoutSeconds()` updates RAM and the same shared settings worker saves after 600 ms quiet, retrying failures. No NVS work on input/render paths.
 - Keira: Settings -> Display, brightness, Auto-off and Idle dim controls. Up/Down selects; Left/Right or D/A adjusts. The menu disables its usual horizontal paging so adjustment cannot also switch rows.
 - Lilplayer: Settings -> Display with the same three values and controls. English/Ukrainian labels are provided in both applications.
-- Keira allows automatic off/dim only on Launcher, not foreground applications. Lilplayer allows both optional timers in every transport/work state, including playback/loading/scanning/retries/prompts; audio and background work continue. Doom allows both timers only in startup WAD/sound/Display menus and restores brightness before engine startup; gameplay and its pause/menu remain active. This is LCD/backlight control, not MCU sleep.
+- Keira allows automatic off/dim only on Launcher, not foreground applications. Lilplayer allows both optional timers in every transport/work state, including playback/loading/scanning/retries/prompts; audio and background work continue. Doom inhibits both timers throughout startup, loading, gameplay, pause and menus. This is LCD/backlight control, not MCU sleep.
+- Automatic direct-display frames normally call `serviceIdle(true)`. Games must call `lilka::display.setIdleEligible(false)` before `lilka::begin()` so every automatic frame services the policy with `false`. This RAM-only policy preserves the user's saved timers. Set it only before startup or on the LCD owner task; it does not override an application's explicit `serviceIdle(...)` calls or Keira's layered compositor policy.
 - Physical input (including held/consumed keys) renews activity. The first wake gesture is consumed until **all** its buttons are released, preventing late chord keys from activating a setting or launching something.
 - `serviceIdle(eligible)` runs only on the LCD owner task. It invokes board LCD/backlight sleep/wake, never MCU sleep. Render loops skip LCD transfers while off and repaint after wake; audio, storage and services continue.
 - Optional dim uses the same presets and inactivity/foreground rules, but temporarily applies hardware 5% without changing the selected value, NVS or LCD sleep state. A key gesture or a foreground app restores the selected brightness. Full off has priority when its timeout is reached; waking off also clears the temporary dim override. Disabling dim restores brightness. Input arriving during dim application is recovered on the next owner frame.
