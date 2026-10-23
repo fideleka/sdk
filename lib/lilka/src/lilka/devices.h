@@ -30,6 +30,12 @@ public:
         char label[48], choice[32];
         int32_t value, minimum, maximum, step;
         uint32_t kind;
+        bool pin;
+    };
+    struct SettingsDraft {
+        uint32_t count = 0, schema = 0;
+        char uuid[37] = {};
+        int32_t original[KD_MAX_SETTINGS] = {}, values[KD_MAX_SETTINGS] = {};
     };
     DeviceManager();
     ~DeviceManager();
@@ -56,6 +62,12 @@ public:
     }
     bool info(unsigned index, Info& result);
     bool settingInfo(unsigned device, unsigned field, SettingInfo& result);
+    /// Snapshot values for editing without changing hardware or persistent state.
+    bool beginSettingsEdit(unsigned index, SettingsDraft& draft);
+    /// Describe a draft value without applying it or checking cross-pin conflicts.
+    bool previewSetting(unsigned index, unsigned field, const SettingsDraft& draft, SettingInfo& result);
+    /// Validate the complete draft, then activate/persist once; reject stale drafts.
+    bool applySettings(unsigned index, const SettingsDraft& draft);
     bool setEnabled(unsigned index, bool enabled);
     bool changeSetting(unsigned index, unsigned field, int direction);
     bool resetSettings(unsigned index);
@@ -143,6 +155,7 @@ private:
     bool load(Slot& slot, const char* path);
     bool restore(Slot& slot);
     bool persist(Slot& slot);
+    bool applySettingsLocked(unsigned index, const int32_t* values);
     bool activate(unsigned index);
     void deactivate();
     bool route();
