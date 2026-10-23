@@ -62,6 +62,9 @@ void Display::begin() {
     // Arduino_ST7789::begin() forces SPI_MODE3, so call Arduino_TFT::begin() with our own data mode
     _override_datamode = displayMode;
     Arduino_TFT::begin(displayFrequency);
+    // LCD RAM can survive a firmware handoff. Never expose an old frame or
+    // adjustment overlay while SD drivers and the saved route are loading.
+    Arduino_ST7789::fillScreen(colors::Black);
     setFont(FONT_10x20);
     setUTF8Print(true);
     serial.log("display ok");

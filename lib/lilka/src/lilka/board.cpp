@@ -12,15 +12,20 @@ Board::Board() {
 }
 
 void Board::begin() {
+    begin(true);
+}
+
+void Board::begin(bool displayReady) {
     // Iterate over the pins, set them as inputs
 #if LILKA_VERSION >= 2
     for (int pin : LILKA_EXT_PINS) {
         pinMode(pin, INPUT);
     }
     pinMode(LILKA_SLEEP, OUTPUT);
-    digitalWrite(LILKA_SLEEP, HIGH);
-    brightness.begin();
+    digitalWrite(LILKA_SLEEP, !LILKA_INDEPENDENT_BACKLIGHT || displayReady ? HIGH : LOW);
+    brightness.begin(displayReady);
 #endif
+    (void)displayReady;
 }
 
 void Board::enablePowerSavingMode() {

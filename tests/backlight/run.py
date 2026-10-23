@@ -74,6 +74,17 @@ int main(int argc,char** argv){
  if(scenario>=1&&scenario<=3){fail=scenario;assert(!brightness.begin());assert(!brightness.isEnabled()&&pinHigh==1);return 0;}
  if(scenario==5)stored=0;
 #if LILKA_INDEPENDENT_BACKLIGHT && LILKA_VERSION==2
+ if(scenario>=6){
+   assert(brightness.begin(false)&&duty==0&&brightness.getBrightness()==37);
+   assert(!brightness.getOverlay().valid&&writes==0);
+   assert(brightness.begin()&&duty==0); // Repeated initialization cannot release the hold.
+   assert(brightness.setActiveDisplays(scenario!=7,scenario==7));
+   assert(duty==0); // Driver activation/fallback routing cannot release the hold.
+   assert(brightness.resume());
+   assert(duty==(scenario==7?0:94)); // External stays dark; Internal/fallback restores selected level.
+   assert(!brightness.getOverlay().valid&&writes==0&&brightness.getBrightness()==37);
+   return 0;
+ }
  assert(brightness.begin());assert(brightness.begin());assert(reads==1);
  assert(brightness.getBrightness()==(scenario==5?5:37));
  assert(brightness.isPWMChannelReserved(6)&&brightness.isPWMChannelReserved(7));
@@ -163,5 +174,5 @@ with tempfile.TemporaryDirectory(prefix='lilka-backlight-') as directory:
                      '-DLILKA_VERSION='+str(version),'-DLILKA_INDEPENDENT_BACKLIGHT='+str(enabled),
                      '-I'+str(tmp),'-I'+str(U8G2),str(tmp/'brightness.cpp'),str(tmp/'settings_persistence.cpp'),str(tmp/'regression.cpp'),'-o',str(tmp/'regression')]
             subprocess.run(command,check=True)
-            scenarios=('0','1','2','3','5') if version==2 and enabled else ('0',)
+            scenarios=('0','1','2','3','5','6','7') if version==2 and enabled else ('0',)
             for scenario in scenarios: subprocess.run([str(tmp/'regression'),scenario],check=True)

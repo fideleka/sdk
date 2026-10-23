@@ -87,9 +87,12 @@ bool update(int value, bool relative, bool showFeedback) {
 } // namespace
 
 bool Brightness::begin() {
-    return nativeControl && beginOutput();
+    return begin(true);
 }
-bool Brightness::beginOutput() {
+bool Brightness::begin(bool initiallyActive) {
+    return nativeControl && beginOutput(initiallyActive);
+}
+bool Brightness::beginOutput(bool initiallyActive) {
     if (enabled.load()) return true;
     if (!hardwareMutex) hardwareMutex = xSemaphoreCreateMutex();
     if (!hardwareMutex) return false;
@@ -113,7 +116,7 @@ bool Brightness::beginOutput() {
     output.timer_sel = LEDC_TIMER_3;
     output.intr_type = LEDC_INTR_DISABLE;
     output.gpio_num = LILKA_SLEEP;
-    output.duty = initial == 100 ? 256 : (initial * 255 + 50) / 100;
+    output.duty = initiallyActive ? brightnessDuty(initial) : 0;
     if (ledc_timer_config(&timer) != ESP_OK || (nativeControl && ledc_channel_config(&output) != ESP_OK)) {
         if (nativeControl) {
             gpio_reset_pin(static_cast<gpio_num_t>(LILKA_SLEEP));
@@ -122,6 +125,7 @@ bool Brightness::beginOutput() {
         }
         return false;
     }
+    sleeping = !initiallyActive;
     requested.store(initial);
     if (stored < 5) {
         ++revision;
@@ -311,6 +315,9 @@ Brightness brightness;
 #else
 namespace lilka {
 bool Brightness::begin() {
+    return false;
+}
+bool Brightness::begin(bool) {
     return false;
 }
 bool Brightness::isEnabled() {
