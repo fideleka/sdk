@@ -147,8 +147,11 @@ A successful display-mode change produces 1.2 seconds of feedback using the same
 RAM-only renderer as brightness/volume. Internal/External/Both text and two monitor
 icons show the selected route. The newest feedback wins; failed/no-op changes do
 not renew the timeout. Keira composes one localized snapshot for both outputs;
-app canvases and screenshots remain untouched. Standalone SDK text defaults to
-English. Diagnostic hold mode deliberately suppresses these external frame writes.
+app canvases and screenshots remain untouched. SDK feedback now uses the same
+compile-time language selection as Keira in every application: Ukrainian by
+default, ``LANG_EN`` for English, with explicit ``LANG_UK`` taking precedence.
+This does not override application-specific menu language preferences.
+Diagnostic hold mode deliberately suppresses these external frame writes.
 
 Verification boundary
 ---------------------

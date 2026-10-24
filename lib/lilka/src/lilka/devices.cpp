@@ -1,6 +1,7 @@
 #include <lilka/rgb565_pack.h>
 #include "devices.h"
 #include "frame_row.h"
+#include "localization.h"
 #ifndef LILKA_MEASURE_DISPLAY
 #    define LILKA_MEASURE_DISPLAY 0
 #endif
@@ -852,7 +853,10 @@ bool DeviceManager::setDisplayMode(Mode value) {
         modeFeedback.valid = true;
         modeFeedback.adjustedAt = millis();
         modeFeedback.displayMode = value;
-        const char* names[] = {"Internal", "External", "Both"};
+        const char* names[] = {LILKA_S_DISPLAY_INTERNAL, LILKA_S_DISPLAY_EXTERNAL, LILKA_S_DISPLAY_BOTH};
+        static_assert(sizeof(LILKA_S_DISPLAY_INTERNAL) <= sizeof(modeFeedback.muteLabel), "Display label too long");
+        static_assert(sizeof(LILKA_S_DISPLAY_EXTERNAL) <= sizeof(modeFeedback.muteLabel), "Display label too long");
+        static_assert(sizeof(LILKA_S_DISPLAY_BOTH) <= sizeof(modeFeedback.muteLabel), "Display label too long");
         strlcpy(modeFeedback.muteLabel, names[value], sizeof(modeFeedback.muteLabel));
         xSemaphoreGive(frameMutex);
     }

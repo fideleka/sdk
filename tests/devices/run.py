@@ -423,13 +423,20 @@ int main(int argc,char**argv){
  assert(lilka::brightness.pin==47);
  assert(m.setDisplayMode(DeviceManager::External));assert(!lilka::brightness.native&&lilka::brightness.external);
  const auto externalFeedback=m.getOverlay();
- assert(externalFeedback.visible(fakeTime)&&externalFeedback.displayMode==1&&!strcmp(externalFeedback.muteLabel,"External"));
+#if defined(LANG_EN) && !defined(LANG_UK)
+ const char* modeNames[]={"Internal","External","Both"};
+#else
+ const char* modeNames[]={"Внутрішній","Зовнішній","Обидва"};
+#endif
+ assert(externalFeedback.visible(fakeTime)&&externalFeedback.displayMode==1&&!strcmp(externalFeedback.muteLabel,modeNames[1]));
  fakeTime+=10;assert(m.setDisplayMode(DeviceManager::External));assert(m.getOverlay().adjustedAt==externalFeedback.adjustedAt);
  failNvs=true;assert(!m.setDisplayMode(DeviceManager::Both));failNvs=false;
  assert(m.displayMode()==DeviceManager::External&&m.getOverlay().displayMode==1&&m.getOverlay().adjustedAt==externalFeedback.adjustedAt);
  fakeTime=externalFeedback.adjustedAt+1200;assert(!m.getOverlay().visible(fakeTime));
  assert(m.setDisplayMode(DeviceManager::Both));assert(lilka::brightness.native&&lilka::brightness.external);
+ assert(m.getOverlay().displayMode==2&&!strcmp(m.getOverlay().muteLabel,modeNames[2]));
  assert(m.setDisplayMode(DeviceManager::Internal));assert(lilka::brightness.native&&!lilka::brightness.external);
+ assert(m.getOverlay().displayMode==0&&!strcmp(m.getOverlay().muteLabel,modeNames[0]));
  m.deactivate();assert(lilka::brightness.pin==-1&&!m.extensionPinOwned(47));
  m.slots[0].values[4]=0;assert(m.activate(0));
  // Panel-drive choices emit only documented B1/B4 overrides; default unchanged.
@@ -626,7 +633,7 @@ with tempfile.TemporaryDirectory(prefix='keira-device-host-') as tmp:
     (tmp / 'lilka').mkdir()
     (tmp / 'lilka/dynloader.h').write_text(loader.read_text())
     (tmp / 'lilka/rgb565_pack.h').write_text((loader.parent / 'rgb565_pack.h').read_text())
-    for name in ['devices.h', 'devices.cpp', 'device_driver.h', 'frame_metrics.h', 'frame_row.h', 'elfcheck.h', 'elfcheck.cpp']:
+    for name in ['devices.h', 'devices.cpp', 'device_driver.h', 'frame_metrics.h', 'frame_row.h', 'elfcheck.h', 'elfcheck.cpp', 'localization.h']:
         (tmp/'lilka'/name).write_text((sources/name).read_text())
     for name in ['display.h','brightness.h','serial.h','volume_overlay.h','Preferences.h','freertos/FreeRTOS.h','freertos/task.h','freertos/semphr.h']:
         p = tmp/'lilka'/name
@@ -635,8 +642,9 @@ with tempfile.TemporaryDirectory(prefix='keira-device-host-') as tmp:
     (tmp / 'test.cpp').write_text(harness)
     subprocess.run(['gcc','-std=c11','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Dmain=kd_driver_entry','-Dmemset=kd_module_memset',
                     '-c',str(root/'drivers/ili9341/driver.c'),'-o',str(tmp/'driver.o')],check=True)
-    subprocess.run(['g++','-std=c++17','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',
+    for language in ([], ['-DLANG_EN'], ['-DLANG_UK'], ['-DLANG_EN', '-DLANG_UK']):
+        subprocess.run(['g++','-std=c++17','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer', *language,
                     '-I'+str(tmp),'-I'+str(tmp/'lilka'),'-I'+os.environ.get('ARDUINOJSON_INCLUDE', str(root.parent/'keira/.pio/libdeps/v2/ArduinoJson/src')),
                     str(tmp/'test.cpp'),str(tmp/'lilka/elfcheck.cpp'),str(tmp/'driver.o'),
                     '-o',str(tmp/'test')],check=True)
-    subprocess.run([str(tmp/'test'),sys.argv[1]],check=True)
+        subprocess.run([str(tmp/'test'),sys.argv[1]],check=True)
