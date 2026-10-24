@@ -39,3 +39,12 @@ with tempfile.TemporaryDirectory(prefix="sdk-wifi-test-") as directory:
                     check=True,
                 )
                 subprocess.run([str(output)], check=True, env={**os.environ, "ASAN_OPTIONS": "detect_leaks=1"})
+
+with tempfile.TemporaryDirectory(prefix="sdk-wifi-o2-") as directory:
+    output = Path(directory) / "credentials"
+    subprocess.run(["g++", "-std=c++11", "-O2", "-Wall", "-Wextra", "-Werror",
+                    "-Wformat-truncation=2", "-Wno-sign-compare",
+                    "-I" + str(tests), "-I" + str(root / "lib/lilka/src"),
+                    str(sources / "wifi_credentials.cpp"), str(tests / "host.cpp"),
+                    "-o", str(output)], check=True)
+    subprocess.run([str(output)], check=True)

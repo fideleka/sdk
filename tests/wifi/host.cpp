@@ -53,6 +53,8 @@ int main() {
     reset();
     for (unsigned i = 0; i < NetworkCredentials::Capacity; ++i) {
         assert(NetworkCredentials::save(prefs, String(std::to_string(i)), "password123"));
+        const std::string key = "wifi" + std::to_string(i);
+        assert(prefs.isKey(key.c_str()));
     }
     assert(!NetworkCredentials::save(prefs, "overflow", "password123"));
     assert(NetworkCredentials::forget(prefs, "3"));
