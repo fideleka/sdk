@@ -25,7 +25,8 @@ String NetworkCredentials::passwordKey(const String& ssid) {
 }
 
 String NetworkCredentials::slotKey(unsigned slot) {
-    char key[12];
+    // Also bound the full unsigned range when -O2 inlining widens its analysis.
+    char key[16];
     std::snprintf(key, sizeof(key), "wifi%u", slot);
     return String(key);
 }
