@@ -3,6 +3,7 @@
 #include <map>
 #include <vector>
 #include <cstring>
+#include <cassert>
 struct Preferences {
     static std::map<std::string, std::vector<uint8_t>> data;
     static std::string failWrite, failRemove;
@@ -20,6 +21,7 @@ struct Preferences {
         return data.count(key);
     }
     size_t getBytesLength(const char* key) {
+        assert(isKey(key)); // Missing credential slots must be checked before this noisy API.
         return isKey(key) ? data[key].size() : 0;
     }
     size_t getBytes(const char* key, void* out, size_t length) {

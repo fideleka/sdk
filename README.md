@@ -188,7 +188,14 @@ Lookup-table-based trigonometric functions for performance-critical code:
 
 ### Serial
 
-Enhanced serial logging with colored ANSI output:
+Serial errors remain enabled by default. Informational diagnostics require
+`LILKA_LOG_LEVEL=2` for the application and SDK compilation. The default `1`
+elides `log()` formatting and queue work; `err()` stays active. Runtime IDF
+verbosity is reduced before device initialization. Explicit user stdout remains
+available to Lua/mJS/stdio consoles. Display/input measurement flags default off;
+normal display capture/transfers retain no profiling accumulators or timer reads.
+
+Diagnostic logging uses colored ANSI output:
 
 - `log()` / `err()` / `idf()` — formatted logging (green INFO, red ERROR, blue IDF)
 - Runs in a separate FreeRTOS task with mutex protection

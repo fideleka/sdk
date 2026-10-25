@@ -43,3 +43,8 @@ The Lilka SDK — a PlatformIO library (`lib/lilka/`) that provides hardware abs
 - Run `make check` to run both at once
 - `make todo` lists all `TODO` / `FIXME` / `XXX` in the codebase
 - `make guidelines` lists all `GUIDELINE` comments — read them before changing related code
+
+## Production diagnostics
+
+- Keep LILKA_LOG_LEVEL=1 (errors only) as the default; level 2 explicitly enables informational diagnostics. Keep real failures on err(), not suppressed log(). Preserve user-requested stdout and serial console APIs. Do not turn missing optional NVS records into logged errors; check existence before noisy typed reads.
+- LILKA_MEASURE_DISPLAY=0 must remove capture/transfer timing reads, counters and profiling storage, not only their reports. Retain operational DMA deadlines and fault checks. Test actual display behavior in both modes, and logger backpressure/error visibility in both log levels.

@@ -6,12 +6,16 @@ namespace lilka {
 // helpers:
 
 void serial_log(const char* format, ...) {
+#if LILKA_LOG_LEVEL >= 2
     char buffer[TX_BUFFER_SIZE];
     va_list args;
     va_start(args, format);
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
     serial.log("%s", buffer);
+#else
+    (void)format;
+#endif
 }
 
 void serial_err(const char* format, ...) {
@@ -36,27 +40,21 @@ void SerialInterface::begin(unsigned long baud) {
 #if ARDUINO_USB_CDC_ON_BOOT
     Serial.setTxTimeoutMs(0);
 #endif
-#ifndef NO_GREETING_MESSAGE
+#if !defined(NO_GREETING_MESSAGE) && LILKA_LOG_LEVEL >= 2
     writeGreetingMessage();
 #endif
     // redirect esp logs ->
     esp_log_set_vprintf(serial_idf);
+#if LILKA_LOG_LEVEL < 2
+    // Filter at the producer, before formatting, allocation and the USB queue.
+    esp_log_level_set("*", ESP_LOG_ERROR);
+#endif
 
     // redirect stdio
     register_stdio_vfs();
 
     // Create task writing to serial
     xTaskCreate([](void* arg) { static_cast<SerialInterface*>(arg)->run(); }, "SerialInterface", 2048, this, 1, NULL);
-    // serial.log("STDIN FD = %d", fileno(_GLOBAL_REENT->_stdin));
-    // serial.log("STDOUT FD = %d", fileno(_GLOBAL_REENT->_stdout));
-    // serial.log("STDERR FD = %d", fileno(_GLOBAL_REENT->_stderr));
-
-    //Test printf and scanf
-    // printf("Testing printf and scanf:\n");
-    // printf("Enter an integer: ");
-    // int num;
-    // scanf("%d", &num);
-    // printf("You entered: %d\n", num);
 }
 
 void SerialInterface::enqueue(const char* level, const char* text) {
@@ -74,6 +72,7 @@ void SerialInterface::enqueue(const char* level, const char* text) {
     xSemaphoreGive(serialMutex);
 }
 
+#if LILKA_LOG_LEVEL >= 2
 void SerialInterface::log(const char* format, ...) {
     char text[TX_BUFFER_SIZE];
     va_list args;
@@ -82,6 +81,7 @@ void SerialInterface::log(const char* format, ...) {
     va_end(args);
     enqueue(LILKA_LOG_FORMAT, text);
 }
+#endif
 
 void SerialInterface::err(const char* format, ...) {
     char text[TX_BUFFER_SIZE];
@@ -106,6 +106,7 @@ int SerialInterface::idfV(const char* format, va_list args) {
     return count;
 }
 
+#if LILKA_LOG_LEVEL >= 2
 void SerialInterface::writeGreetingMessage() {
     log("██      ██ ██      ██   ██  █████");
     log("██      ██ ██      ██  ██  ██   ██");
@@ -152,6 +153,7 @@ void SerialInterface::writeGreetingMessage() {
     // Reset Reason
     log("Last Reset Reason: %d\n", esp_reset_reason());
 }
+#endif
 
 void SerialInterface::drainOnce() {
     if (pending.isEmpty()) {
@@ -288,7 +290,8 @@ ssize_t SerialInterface::stdio_vfs_write(int fd, const void* data, size_t size) 
             serial.log("%s", str.c_str()); // should be default esp-idf behavior
             break;
         case STDOUT_FD:
-            serial.log("%s", str.c_str());
+            // Explicit user console output (Lua/mJS/stdio) is not an info log.
+            serial.enqueue(LILKA_LOG_FORMAT, str.c_str());
             break;
         case STDERR_FD:
             serial.err("%s", str.c_str());

@@ -214,7 +214,7 @@ static int elf_arch_relocate(
 ) {
     uint32_t* where = reinterpret_cast<uint32_t*>(elf_map_sym(elf, rela->offset));
     if (!where) {
-        lilka::serial.log("dynloader: reloc where=NULL offset=0x%x", rela->offset);
+        lilka::serial.err("dynloader: reloc where=NULL offset=0x%x", rela->offset);
         return -EINVAL;
     }
 
@@ -235,7 +235,7 @@ static int elf_arch_relocate(
         case R_XTENSA_NONE:
             break;
         default:
-            lilka::serial.log("dynloader: unsupported reloc type %d", LILKA_ELF_R_TYPE(rela->info));
+            lilka::serial.err("dynloader: unsupported reloc type %d", LILKA_ELF_R_TYPE(rela->info));
             return -EINVAL;
     }
 
@@ -299,7 +299,9 @@ static int elf_load_sections(lilka_elf_t* elf, const uint8_t* pbuf) {
                 elf->sec[LILKA_ELF_SEC_DRLRO].size = shdr[i].size;
                 elf->sec[LILKA_ELF_SEC_DRLRO].offset = shdr[i].offset;
             }
-        } else if (shdr[i].type == LILKA_SHT_NOBITS && (shdr[i].flags & (LILKA_SHF_ALLOC | LILKA_SHF_WRITE)) == (LILKA_SHF_ALLOC | LILKA_SHF_WRITE) && strcmp(".bss", name) == 0) {
+        } else if (shdr[i].type == LILKA_SHT_NOBITS &&
+                   (shdr[i].flags & (LILKA_SHF_ALLOC | LILKA_SHF_WRITE)) == (LILKA_SHF_ALLOC | LILKA_SHF_WRITE) &&
+                   strcmp(".bss", name) == 0) {
             elf->sec[LILKA_ELF_SEC_BSS].v_addr = shdr[i].addr;
             elf->sec[LILKA_ELF_SEC_BSS].size = shdr[i].size;
             elf->sec[LILKA_ELF_SEC_BSS].offset = shdr[i].offset;
@@ -308,7 +310,7 @@ static int elf_load_sections(lilka_elf_t* elf, const uint8_t* pbuf) {
 
     /* Validate: we need at least a .text section */
     if (!elf->sec[LILKA_ELF_SEC_TEXT].size) {
-        lilka::serial.log("dynloader: no .text section found");
+        lilka::serial.err("dynloader: no .text section found");
         return -EINVAL;
     }
 
@@ -316,7 +318,7 @@ static int elf_load_sections(lilka_elf_t* elf, const uint8_t* pbuf) {
     uint32_t text_alloc_size = LILKA_ELF_ALIGN(elf->sec[LILKA_ELF_SEC_TEXT].size, 4);
     elf->ptext = static_cast<unsigned char*>(elf_malloc(text_alloc_size, true));
     if (!elf->ptext) {
-        lilka::serial.log("dynloader: failed to alloc %u bytes for .text", text_alloc_size);
+        lilka::serial.err("dynloader: failed to alloc %u bytes for .text", text_alloc_size);
         return -ENOMEM;
     }
     bool text_in_iram = is_iram_addr((uintptr_t)elf->ptext);
@@ -334,7 +336,7 @@ static int elf_load_sections(lilka_elf_t* elf, const uint8_t* pbuf) {
     if (data_size) {
         elf->pdata = static_cast<unsigned char*>(elf_malloc(data_size, false));
         if (!elf->pdata) {
-            lilka::serial.log("dynloader: failed to alloc %u bytes for data", data_size);
+            lilka::serial.err("dynloader: failed to alloc %u bytes for data", data_size);
             elf_free(elf->ptext);
             elf->ptext = nullptr;
             return -ENOMEM;
@@ -396,13 +398,13 @@ int lilka_elf_relocate(lilka_elf_t* elf, const uint8_t* pbuf, size_t size) {
 
     /* Validate ELF magic */
     if (ehdr->ident[0] != 0x7f || ehdr->ident[1] != 'E' || ehdr->ident[2] != 'L' || ehdr->ident[3] != 'F') {
-        lilka::serial.log("dynloader: invalid ELF magic");
+        lilka::serial.err("dynloader: invalid ELF magic");
         return -EINVAL;
     }
 
     /* Validate 32-bit, little-endian */
     if (ehdr->ident[4] != 1 || ehdr->ident[5] != 1) {
-        lilka::serial.log("dynloader: expected 32-bit little-endian ELF");
+        lilka::serial.err("dynloader: expected 32-bit little-endian ELF");
         return -EINVAL;
     }
 
@@ -441,7 +443,7 @@ int lilka_elf_relocate(lilka_elf_t* elf, const uint8_t* pbuf, size_t size) {
                                                elf->sec[LILKA_ELF_SEC_DATA].v_addr);
                         }
                         if (!addr) {
-                            lilka::serial.log("dynloader: unresolved symbol: %s", sym_name);
+                            lilka::serial.err("dynloader: unresolved symbol: %s", sym_name);
                             return -ENOSYS;
                         }
                     }
@@ -458,7 +460,7 @@ int lilka_elf_relocate(lilka_elf_t* elf, const uint8_t* pbuf, size_t size) {
                                            elf->sec[LILKA_ELF_SEC_TEXT].v_addr);
                     }
                     if (!addr) {
-                        lilka::serial.log("dynloader: unresolved function: %s", func_name);
+                        lilka::serial.err("dynloader: unresolved function: %s", func_name);
                         return -ENOSYS;
                     }
                 }
@@ -556,7 +558,7 @@ int lilka_dynloader_run(const char* path, int argc, char* argv[]) {
     /* Open and read the .so file */
     FILE* f = fopen(path, "rb");
     if (!f) {
-        lilka::serial.log("dynloader: failed to open %s", path);
+        lilka::serial.err("dynloader: failed to open %s", path);
         return -EIO;
     }
 
@@ -572,7 +574,7 @@ int lilka_dynloader_run(const char* path, int argc, char* argv[]) {
     uint8_t* buf = static_cast<uint8_t*>(elf_malloc(fsize, false));
     if (!buf) {
         fclose(f);
-        lilka::serial.log("dynloader: failed to alloc %ld bytes for file", fsize);
+        lilka::serial.err("dynloader: failed to alloc %ld bytes for file", fsize);
         return -ENOMEM;
     }
 
@@ -674,7 +676,7 @@ int DynLoader::load(const char* path) {
     FILE* f = fopen(path, "rb");
     if (!f) {
         errorMsg = "Failed to open .so file";
-        serial.log("dynloader: %s: %s", errorMsg, path);
+        serial.err("dynloader: %s: %s", errorMsg, path);
         return -EIO;
     }
 
@@ -709,7 +711,7 @@ int DynLoader::load(const char* path) {
     int ret = lilka_elf_relocate(&elf, fileData, fileSize);
     if (ret != 0) {
         errorMsg = "ELF relocation failed";
-        serial.log("dynloader: relocation failed: %d", ret);
+        serial.err("dynloader: relocation failed: %d", ret);
         lilka_elf_deinit(&elf);
         elf_free(fileData);
         fileData = nullptr;

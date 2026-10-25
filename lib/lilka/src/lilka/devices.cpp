@@ -885,7 +885,9 @@ bool DeviceManager::capture(
     bool good = frame && routed.load() && mode != Internal;
     const int w = lilka::display.width(), h = lilka::display.height();
     if (good && w > 0 && h > 0 && w <= 320 && h <= 320 && static_cast<size_t>(w) * h <= frameCapacity) {
+#    if LILKA_MEASURE_DISPLAY
         const int64_t start = esp_timer_get_time();
+#    endif
         const bool force = !frameValid || width != w || height != h;
         // Only the external worker retains a frame between compositor iterations.
         // Reuse the other frame even if it was previously published: latest wins.
@@ -935,11 +937,11 @@ bool DeviceManager::capture(
         height = h;
         frameValid = true;
         pending = pending || changed;
+#    if LILKA_MEASURE_DISPLAY
         ++captureCount;
         if (!changed) ++unchangedCaptures;
         captureUs = esp_timer_get_time() - start;
         captureTiming.record(captureUs);
-#    if LILKA_MEASURE_DISPLAY
         displayProfile::record(displayProfile::Stage::Capture, captureUs);
 #    endif
     } else good = false;
@@ -995,8 +997,10 @@ int DeviceManager::presentPending(
     const bool supportsRows =
         slot.descriptor->size >= offsetof(kd_device, prefer_full_frame) && slot.descriptor->present_rows;
     if (!supportsRows || bands > 8 || rows * 4 >= unsigned(height) * 3) {
+#    if LILKA_MEASURE_DISPLAY
         ++fullTransfers;
         transferPixels += uint32_t(width) * height;
+#    endif
         return slot.descriptor->present(&slot.host, slot.state, pixels, width, height);
     }
     for (unsigned y = 0; y < height;) {
@@ -1007,8 +1011,10 @@ int DeviceManager::presentPending(
         const unsigned first = y;
         while (y < height && (dirty[y / 32] & (uint32_t(1) << (y % 32))))
             ++y;
+#    if LILKA_MEASURE_DISPLAY
         ++rowTransfers;
         transferPixels += uint32_t(width) * (y - first);
+#    endif
         const int result =
             slot.descriptor->present_rows(&slot.host, slot.state, pixels, width, height, first, y - first);
         if (result) return result;
@@ -1018,8 +1024,11 @@ int DeviceManager::presentPending(
 void DeviceManager::run() {
     workerReady = true;
     ++generation;
-    uint32_t previousLog = millis(), previousTransfer = 0, loggedTransfers = 0;
+    uint32_t previousTransfer = 0;
+#    if LILKA_MEASURE_DISPLAY
+    uint32_t previousLog = millis(), loggedTransfers = 0;
     DisplayFrameMetrics transferTiming;
+#    endif
     while (true) {
         const unsigned cycles = cycleRequests.exchange(0);
         if (cycles) setDisplayMode(static_cast<Mode>((mode.load() + cycles) % 3));
@@ -1045,15 +1054,19 @@ void DeviceManager::run() {
         xSemaphoreGive(frameMutex);
         if (pixels) {
             previousTransfer = millis();
+#    if LILKA_MEASURE_DISPLAY
             const int64_t start = esp_timer_get_time();
+#    endif
             auto& slot = slots[active];
             const int result = presentPending(slot, pixels, frameWidth, frameHeight, rows);
             xSemaphoreTake(frameMutex, portMAX_DELAY);
             externalReading = -1;
             xSemaphoreGive(frameMutex);
+#    if LILKA_MEASURE_DISPLAY
             transferUs = esp_timer_get_time() - start;
             transferTiming.record(transferUs);
             ++transferCount;
+#    endif
             if (result) {
                 deactivate();
                 strlcpy(
@@ -1063,7 +1076,8 @@ void DeviceManager::run() {
                 );
             }
         }
-        if (LILKA_MEASURE_DISPLAY && millis() - previousLog >= 5000u && active >= 0 && mode != Internal) {
+#    if LILKA_MEASURE_DISPLAY
+        if (millis() - previousLog >= 5000u && active >= 0 && mode != Internal) {
             const uint32_t elapsed = millis() - previousLog;
             const uint32_t externalFps = transferTiming.fpsX10(elapsed);
             xSemaphoreTake(frameMutex, portMAX_DELAY);
@@ -1106,7 +1120,7 @@ void DeviceManager::run() {
                 heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
                 uxTaskGetStackHighWaterMark(nullptr)
             );
-#    if LILKA_MEASURE_DISPLAY
+#        if LILKA_MEASURE_DISPLAY
             lilka::serial.log(
                 "measure-spi: pack-chunks=%u pack-total-us=%llu pack-avg/max-us=%u/%u wait-chunks=%u "
                 "wait-total-us=%llu wait-avg/max-us=%u/%u",
@@ -1120,11 +1134,12 @@ void DeviceManager::run() {
                 dmaWaitTiming.maxUs
             );
             packingTiming = dmaWaitTiming = DisplayFrameMetrics{};
-#    endif
+#        endif
             loggedTransfers = transferCount;
             previousLog = millis();
             transferTiming = DisplayFrameMetrics{};
         }
+#    endif
         xSemaphoreGive(mutex);
         vTaskDelay(pdMS_TO_TICKS(routed ? 2 : 100));
     }
@@ -1287,7 +1302,7 @@ int32_t DeviceManager::fail(Slot& slot, const char* operation, int32_t error) {
     const String message =
         formatString("%s: %s (0x%x)", operation, esp_err_to_name(error), static_cast<unsigned>(error));
     strlcpy(slot.status, message.c_str(), sizeof(slot.status));
-    lilka::serial.log("devices [%s]: %s", slot.name, slot.status);
+    lilka::serial.err("devices [%s]: %s", slot.name, slot.status);
     return -1;
 }
 DeviceManager devices;
