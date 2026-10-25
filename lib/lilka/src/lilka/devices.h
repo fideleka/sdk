@@ -41,6 +41,9 @@ public:
     ~DeviceManager();
     /// Discover once after SD/display initialization and start the bounded SPI worker.
     bool begin(bool skip = false);
+    /// Select the SPI worker CPU before begin; default is tskNO_AFFINITY.
+    /// Startup-only: reject invalid CPUs and changes after worker creation.
+    bool setWorkerCore(BaseType_t core);
     void discover(bool skip);
     /// Queue a mode change; no SPI, allocation or NVS on the input scan task.
     void requestCycle();
@@ -147,6 +150,7 @@ private:
     int backlightPin = -1;
     int dcPin = -1, resetPin = -1, clkPin = -1, mosiPin = -1;
     TaskHandle_t worker = nullptr;
+    BaseType_t workerCore = tskNO_AFFINITY;
     std::atomic<unsigned> cycleRequests{0};
     std::atomic<bool> sleeping{false};
     std::atomic<bool> presentationReady{true};

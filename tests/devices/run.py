@@ -30,8 +30,13 @@ mock = r'''
 #define LILKA_P4 47
 #define LILKA_P3 48
 using TaskHandle_t=void*;
+using BaseType_t=int;
+#define tskNO_AFFINITY 0x7fffffff
+#define portNUM_PROCESSORS 2
 #define pdPASS 1
-inline int xTaskCreate(void(*)(void*),const char*,unsigned,void*,unsigned,TaskHandle_t*handle){*handle=reinterpret_cast<void*>(1);return pdPASS;}
+inline int createdCore=-1, createdPriority=-1;
+inline bool failWorker=false;
+inline int xTaskCreatePinnedToCore(void(*)(void*),const char*,unsigned,void*,unsigned priority,TaskHandle_t*handle,int core){createdCore=core;createdPriority=priority;if(failWorker)return 0;*handle=reinterpret_cast<void*>(1);return pdPASS;}
 #define MALLOC_CAP_SPIRAM 1
 #define MALLOC_CAP_8BIT 2
 #define MALLOC_CAP_EXEC 4
@@ -611,7 +616,10 @@ int main(int argc,char**argv){
  puts("PASS: transactional pin drafts, preview/no-op, prevalidation, full swaps, one restart/save, stale rejection and rollback/fallback");
  // Restore the selected route, but Select-held recovery forces Internal.
  nvm.clear();nvm["displayMode"]={DeviceManager::Both};
- {DeviceManager m;registered(m,0);assert(m.begin(false));assert(m.displayMode()==DeviceManager::Both);assert(m.begin(false));}
+ {DeviceManager m;registered(m,0);assert(m.begin(false));assert(createdCore==tskNO_AFFINITY&&createdPriority==1);assert(m.displayMode()==DeviceManager::Both);assert(m.begin(false));assert(!m.setWorkerCore(1));}
+ {DeviceManager m;registered(m,0);assert(!m.setWorkerCore(-1));assert(!m.setWorkerCore(2));assert(m.setWorkerCore(0));assert(m.setWorkerCore(1));assert(m.begin(false));assert(createdCore==1&&createdPriority==1);assert(!m.setWorkerCore(tskNO_AFFINITY));}
+ {DeviceManager m;registered(m,0);assert(m.setWorkerCore(1));failWorker=true;assert(!m.begin(false));assert(m.internalOutput()&&!m.externalOutput());failWorker=false;assert(m.setWorkerCore(0));assert(m.begin(false));assert(createdCore==0);}
+ puts("PASS: opt-in display affinity, unchanged default/priority, invalid/late rejection and allocation failure retry");
  {DeviceManager m;assert(m.begin(true));assert(m.displayMode()==DeviceManager::Internal);}
  nvm["displayMode"]={255};
  {DeviceManager m;assert(m.begin(false));assert(m.displayMode()==DeviceManager::Internal);}

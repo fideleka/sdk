@@ -1,10 +1,18 @@
 #include <lilka/rgb565_pack.h>
 #include "devices.h"
+
 #include "frame_row.h"
 #include "localization.h"
 #ifndef LILKA_MEASURE_DISPLAY
 #    define LILKA_MEASURE_DISPLAY 0
 #endif
+namespace lilka {
+bool DeviceManager::setWorkerCore(BaseType_t core) {
+    if (worker || (core != tskNO_AFFINITY && (core < 0 || core >= portNUM_PROCESSORS))) return false;
+    workerCore = core;
+    return true;
+}
+} // namespace lilka
 #if LILKA_VERSION != 1
 #    include "display.h"
 #    include "elfcheck.h"
@@ -177,7 +185,7 @@ bool DeviceManager::begin(bool skip) {
         serial.log("display-device: no registered display driver; internal fallback");
         return true;
     }
-    if (xTaskCreate(workerEntry, "display-devices", 6144, this, 1, &worker) != pdPASS) {
+    if (xTaskCreatePinnedToCore(workerEntry, "display-devices", 6144, this, 1, &worker, workerCore) != pdPASS) {
         workerReady = false;
         serial.err(
             "display-device: worker allocation failed: requested=6144 internal-free=%u largest=%u",
