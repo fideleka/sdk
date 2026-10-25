@@ -12,6 +12,11 @@ bool DeviceManager::setWorkerCore(BaseType_t core) {
     workerCore = core;
     return true;
 }
+bool DeviceManager::setWorkerPriority(UBaseType_t priority) {
+    if (worker || priority == 0 || priority >= configMAX_PRIORITIES) return false;
+    workerPriority = priority;
+    return true;
+}
 } // namespace lilka
 #if LILKA_VERSION != 1
 #    include "display.h"
@@ -185,7 +190,8 @@ bool DeviceManager::begin(bool skip) {
         serial.log("display-device: no registered display driver; internal fallback");
         return true;
     }
-    if (xTaskCreatePinnedToCore(workerEntry, "display-devices", 6144, this, 1, &worker, workerCore) != pdPASS) {
+    if (xTaskCreatePinnedToCore(workerEntry, "display-devices", 6144, this, workerPriority, &worker, workerCore) !=
+        pdPASS) {
         workerReady = false;
         serial.err(
             "display-device: worker allocation failed: requested=6144 internal-free=%u largest=%u",
