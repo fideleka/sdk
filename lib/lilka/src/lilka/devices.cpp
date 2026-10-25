@@ -1,5 +1,6 @@
 #include <lilka/rgb565_pack.h>
 #include "devices.h"
+#include "display_profile.h"
 
 #include "frame_row.h"
 #include "localization.h"
@@ -938,6 +939,9 @@ bool DeviceManager::capture(
         if (!changed) ++unchangedCaptures;
         captureUs = esp_timer_get_time() - start;
         captureTiming.record(captureUs);
+#    if LILKA_MEASURE_DISPLAY
+        displayProfile::record(displayProfile::Stage::Capture, captureUs);
+#    endif
     } else good = false;
     xSemaphoreGive(frameMutex);
     return good;
@@ -1212,7 +1216,9 @@ int32_t DeviceManager::spiPixels(void* context, const uint16_t* pixels, uint32_t
 #    endif
         lilka::packRGB565(staging, pixels, length);
 #    if LILKA_MEASURE_DISPLAY
-        manager.packingTiming.record(esp_timer_get_time() - packingStart);
+        const uint32_t packedUs = esp_timer_get_time() - packingStart;
+        manager.packingTiming.record(packedUs);
+        displayProfile::record(displayProfile::Stage::ExternalPack, packedUs, length * 2);
 #    endif
         // Pack the other staging buffer while the preceding chunk shifts out.
         // Only one transaction is outstanding: no descriptor/buffer is reused
@@ -1244,6 +1250,7 @@ void DeviceManager::spiClose(void* context) {
 }
 
 int DeviceManager::submit(spi_transaction_t& transfer, const uint8_t* bytes, uint32_t bits) {
+    displayProfile::Scope metric(displayProfile::Stage::ExternalFeed);
     transfer = {};
     transfer.length = bits;
     transfer.tx_buffer = bytes;
@@ -1258,7 +1265,9 @@ int DeviceManager::finish(const spi_transaction_t& transfer) {
     spi_transaction_t* completed = nullptr;
     const esp_err_t result = spi_device_get_trans_result(spi, &completed, pdMS_TO_TICKS(100));
 #    if LILKA_MEASURE_DISPLAY
-    dmaWaitTiming.record(esp_timer_get_time() - waitStart);
+    const uint32_t waitedUs = esp_timer_get_time() - waitStart;
+    dmaWaitTiming.record(waitedUs);
+    displayProfile::record(displayProfile::Stage::ExternalWait, waitedUs);
 #    endif
     if (result != ESP_OK || completed != &transfer) {
         // Retain BOTH staging buffers/descriptors/bus on uncertain completion.

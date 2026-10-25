@@ -626,6 +626,13 @@ int main(int argc,char**argv){
  {DeviceManager m;assert(m.begin(true));assert(m.displayMode()==DeviceManager::Internal);}
  nvm["displayMode"]={255};
  {DeviceManager m;assert(m.begin(false));assert(m.displayMode()==DeviceManager::Internal);}
+
+#if LILKA_MEASURE_DISPLAY
+ assert(displayProfile::sample(displayProfile::Stage::Capture).n>0);
+ assert(displayProfile::sample(displayProfile::Stage::ExternalPack).bytes>0);
+ assert(displayProfile::sample(displayProfile::Stage::ExternalFeed).n>0);
+ assert(displayProfile::sample(displayProfile::Stage::ExternalWait).n>0);
+#endif
  puts("PASS: shared frames/20 in-flight updates/latest-wins, 40 MHz persistence, queued DMA/quarantine, partial/full frames, legacy ABI, overlays, allocation rollback, 20 toggles, ELF bounds and identical fixed-pattern/zero-SPI hold diagnostic");
 }
 '''
@@ -644,7 +651,7 @@ with tempfile.TemporaryDirectory(prefix='keira-device-host-') as tmp:
     (tmp / 'lilka').mkdir()
     (tmp / 'lilka/dynloader.h').write_text(loader.read_text())
     (tmp / 'lilka/rgb565_pack.h').write_text((loader.parent / 'rgb565_pack.h').read_text())
-    for name in ['devices.h', 'devices.cpp', 'device_driver.h', 'frame_metrics.h', 'frame_row.h', 'elfcheck.h', 'elfcheck.cpp', 'localization.h']:
+    for name in ['devices.h', 'devices.cpp', 'display_profile.h', 'device_driver.h', 'frame_metrics.h', 'frame_row.h', 'elfcheck.h', 'elfcheck.cpp', 'localization.h']:
         (tmp/'lilka'/name).write_text((sources/name).read_text())
     for name in ['display.h','brightness.h','serial.h','volume_overlay.h','Preferences.h','freertos/FreeRTOS.h','freertos/task.h','freertos/semphr.h']:
         p = tmp/'lilka'/name
@@ -653,7 +660,7 @@ with tempfile.TemporaryDirectory(prefix='keira-device-host-') as tmp:
     (tmp / 'test.cpp').write_text(harness)
     subprocess.run(['gcc','-std=c11','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Dmain=kd_driver_entry','-Dmemset=kd_module_memset',
                     '-c',str(root/'drivers/ili9341/driver.c'),'-o',str(tmp/'driver.o')],check=True)
-    for language in ([], ['-DLANG_EN'], ['-DLANG_UK'], ['-DLANG_EN', '-DLANG_UK']):
+    for language in ([], ['-DLANG_EN'], ['-DLANG_UK'], ['-DLANG_EN', '-DLANG_UK'], ['-DLILKA_MEASURE_DISPLAY=1']):
         subprocess.run(['g++','-std=c++17','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer', *language,
                     '-I'+str(tmp),'-I'+str(tmp/'lilka'),'-I'+os.environ.get('ARDUINOJSON_INCLUDE', str(root.parent/'keira/.pio/libdeps/v2/ArduinoJson/src')),
                     str(tmp/'test.cpp'),str(tmp/'lilka/elfcheck.cpp'),str(tmp/'driver.o'),
