@@ -234,7 +234,11 @@ int main(int argc,char**argv){
  assert(xSemaphoreTake(m.frameMutex,0));assert(!m.capture(&panel,&old,none,false));xSemaphoreGive(m.frameMutex);
  assert(m.capture(nullptr,nullptr,none,true));assert(m.frame[40*280+20]==0);
  assert(m.capture(nullptr,&small,none,false));
- stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(m.transferCount==1&&!m.pending);
+ stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(!m.pending);
+#if LILKA_MEASURE_DISPLAY
+ assert(m.transferCount==1);
+#endif
+
  // Internal consumes the exact shared pointer, with no second capture/copy.
  m.presentInternal();assert(lilka::display.lastSource==m.frame);assert(lilka::display.pixels==std::vector<uint16_t>(m.frame,m.frame+280*240));
  const auto internalWrites=lilka::display.writes;m.presentInternal();assert(lilka::display.writes==internalWrites);
@@ -260,23 +264,48 @@ int main(int argc,char**argv){
  // The next transfer takes the LATEST frame, not twenty queued stale frames.
  fakeTime+=100;stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(!m.pending);
  // Static captures queue no traffic; one changed scanline sends exactly one row.
+
+#if LILKA_MEASURE_DISPLAY
  const auto baselineTransfers=m.transferCount;
+#endif
+
  assert(m.capture(nullptr,&small,none,false)&&!m.pending);
- stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(m.transferCount==baselineTransfers);
+ stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
+#if LILKA_MEASURE_DISPLAY
+ assert(m.transferCount==baselineTransfers);
+#endif
+
  small.getFramebuffer()[0]=0xabcd;
  assert(m.capture(nullptr,&small,none,false)&&m.pending);
+
+#if LILKA_MEASURE_DISPLAY
  const auto pixelsBefore=m.transferPixels,rowsBefore=m.rowTransfers;
+#endif
+
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
- assert(m.transferPixels-pixelsBefore==280&&m.rowTransfers==rowsBefore+1&&m.frame[40*280+20]==0xabcd);
+ assert(m.frame[40*280+20]==0xabcd);
+
+#if LILKA_MEASURE_DISPLAY
+ assert(m.transferPixels-pixelsBefore==280&&m.rowTransfers==rowsBefore+1);
+#endif
+
  // Even an installed 1.1.2 descriptor requesting full flush is ignored.
  assert(m.slots[0].descriptor->setting_count==10&&m.slots[0].descriptor->settings[8].id==9);
  const auto*rowCurrent=m.slots[0].descriptor;kd_device retired=*rowCurrent;
  retired.size=offsetof(kd_device,backlight_pin);retired.prefer_full_frame=[](const void*,void*)->uint32_t{assert(false);return 1;};
  m.slots[0].descriptor=&retired;
  small.getFramebuffer()[0]^=1;assert(m.capture(nullptr,&small,none,false));
+
+#if LILKA_MEASURE_DISPLAY
  const auto removedFull=m.fullTransfers,removedRows=m.rowTransfers,removedPixels=m.transferPixels;
+#endif
+
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
+
+#if LILKA_MEASURE_DISPLAY
  assert(m.fullTransfers==removedFull&&m.rowTransfers==removedRows+1&&m.transferPixels-removedPixels==280);
+#endif
+
  m.slots[0].descriptor=rowCurrent;
  // Dirty bits accumulate until presented even if a change is reverted.
  small.getFramebuffer()[40]=0xabcd;assert(m.capture(nullptr,&small,none,false));
@@ -298,28 +327,60 @@ int main(int argc,char**argv){
  assert(m.capture(&panel,&old,none,false));
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
  for(int y=0;y<18;y+=2)old.getFramebuffer()[y*280]^=1;
- assert(m.capture(&panel,&old,none,false));const auto fragmented=m.fullTransfers;
- stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(m.fullTransfers==fragmented+1);
+ assert(m.capture(&panel,&old,none,false));
+#if LILKA_MEASURE_DISPLAY
+ const auto fragmented=m.fullTransfers;
+#endif
+
+ stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
+#if LILKA_MEASURE_DISPLAY
+ assert(m.fullTransfers==fragmented+1);
+#endif
+
  std::fill(old.getFramebuffer(),old.getFramebuffer()+280*216,0x7777);
- assert(m.capture(&panel,&old,none,false));const auto covered=m.fullTransfers;
- stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(m.fullTransfers==covered+1);
+ assert(m.capture(&panel,&old,none,false));
+#if LILKA_MEASURE_DISPLAY
+ const auto covered=m.fullTransfers;
+#endif
+
+ stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
+#if LILKA_MEASURE_DISPLAY
+ assert(m.fullTransfers==covered+1);
+#endif
+
  // ASan checks a truly short legacy descriptor: never access its optional tail.
  const auto*current=m.slots[0].descriptor;
  auto*legacy=static_cast<kd_device*>(std::malloc(offsetof(kd_device,present_rows)));
  std::memcpy(legacy,current,offsetof(kd_device,present_rows));legacy->size=offsetof(kd_device,present_rows);
  m.slots[0].descriptor=nullptr;assert(!DeviceManager::registerDevice(&m.slots[0],legacy));
  clipped.getFramebuffer()[110]=0x1111;assert(m.capture(&panel,&clipped,none,false));
+
+#if LILKA_MEASURE_DISPLAY
  const auto legacyPixels=m.transferPixels;
- stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(m.transferPixels-legacyPixels==280*240);
+#endif
+
+ stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
+#if LILKA_MEASURE_DISPLAY
+ assert(m.transferPixels-legacyPixels==280*240);
+#endif
+
  m.slots[0].descriptor=current;std::free(legacy);
  // Old row-capable ABI-1 descriptors have no policy tail; ASan bounds check.
  auto*rowLegacy=static_cast<kd_device*>(std::malloc(offsetof(kd_device,prefer_full_frame)));
  std::memcpy(rowLegacy,current,offsetof(kd_device,prefer_full_frame));rowLegacy->size=offsetof(kd_device,prefer_full_frame);
  m.slots[0].descriptor=nullptr;assert(!DeviceManager::registerDevice(&m.slots[0],rowLegacy));
  clipped.getFramebuffer()[110]^=1;assert(m.capture(&panel,&clipped,none,false));
+
+#if LILKA_MEASURE_DISPLAY
  const auto oldRows=m.rowTransfers,oldPixels=m.transferPixels;
+#endif
+
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;
+
+#if LILKA_MEASURE_DISPLAY
  assert(m.rowTransfers==oldRows+1 && m.transferPixels-oldPixels==280);
+#endif
+
  m.slots[0].descriptor=current;std::free(rowLegacy);
  const auto previousStarts=starts;
  assert(current->present_rows(&m.slots[0].host,m.slots[0].state,m.frame,280,240,240,1));
@@ -479,9 +540,17 @@ int main(int argc,char**argv){
  m.setSleeping(true);assert(m.sleeping&&m.displayMode()==DeviceManager::Both);
  lilka::Canvas app(0,0,280,240);lilka::VolumeOverlaySnapshot overlay;
  assert(m.capture(nullptr,&app,overlay,false));
- const auto transfers=m.transferCount;stopWorker=true;
+
+#if LILKA_MEASURE_DISPLAY
+ const auto transfers=m.transferCount;
+#endif
+stopWorker=true;
  try{m.run();}catch(const Stop&){}stopWorker=false;
- assert(m.transferCount==transfers);m.setSleeping(false);assert(!m.sleeping);
+
+#if LILKA_MEASURE_DISPLAY
+ assert(m.transferCount==transfers);
+#endif
+m.setSleeping(false);assert(!m.sleeping);
  m.requestCycle();assert(m.cycleRequests==1);stopWorker=true;
  try{m.run();}catch(const Stop&){}stopWorker=false;
  assert(m.displayMode()==DeviceManager::Internal&&m.cycleRequests==0);

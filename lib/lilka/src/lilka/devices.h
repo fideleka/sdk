@@ -133,14 +133,17 @@ private:
     // Bit set means this buffer row is stale relative to the current frame.
     uint32_t staleRows[2][10] = {};
     uint32_t dirtyRows[10] = {}, internalDirtyRows[10] = {};
-    uint32_t unchangedCaptures = 0, fullTransfers = 0, rowTransfers = 0, transferPixels = 0, spiHz = 0,
-             spiRequestedHz = 0;
-    int presentPending(Slot& slot, const uint16_t* pixels, uint16_t width, uint16_t height, const uint32_t* rows);
-    DisplayFrameMetrics captureTiming;
+    uint32_t spiHz = 0, spiRequestedHz = 0;
 #if LILKA_MEASURE_DISPLAY
-    DisplayFrameMetrics packingTiming, dmaWaitTiming;
+    uint32_t unchangedCaptures = 0, fullTransfers = 0, rowTransfers = 0, transferPixels = 0;
 #endif
+    int presentPending(Slot& slot, const uint16_t* pixels, uint16_t width, uint16_t height, const uint32_t* rows);
+
+#if LILKA_MEASURE_DISPLAY
+    DisplayFrameMetrics captureTiming;
+    DisplayFrameMetrics packingTiming, dmaWaitTiming;
     uint32_t captureCount = 0, transferCount = 0, captureUs = 0, transferUs = 0;
+#endif
     spi_device_handle_t spi = nullptr;
     uint8_t* dma = nullptr;
     Slot* spiOwner = nullptr;

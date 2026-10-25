@@ -3,6 +3,7 @@
 #include <queue>
 #include <atomic>
 #include "fileutils.h"
+#include "log_config.h"
 
 #include <esp32/clk.h>
 
@@ -46,7 +47,13 @@ class SerialInterface {
 public:
     SerialInterface();
     void begin(unsigned long baud = SERIAL_BAUD_RATE);
+#if LILKA_LOG_LEVEL >= 2
     void log(const char* format, ...);
+#else
+    // Inline so normal callers retain neither formatting nor queue operations.
+    void log(const char*, ...) {
+    }
+#endif
     void err(const char* format, ...);
     void idf(const char* format, ...);
     /// Records dropped under logger contention/backpressure.
@@ -59,8 +66,10 @@ private:
     int idfV(const char* format, va_list args);
     // Doing all work in a separate task
     void run();
-    // Some fun
+    // Optional diagnostic boot inventory.
+#if LILKA_LOG_LEVEL >= 2
     void writeGreetingMessage();
+#endif
 
     void enqueue(const char* level, const char* text);
     void drainOnce();

@@ -6,10 +6,12 @@ src = root / 'lib/lilka/src/lilka'
 h = (src/'serial.h').read_text()
 s = (src/'serial.cpp').read_text()
 cls = h[h.index('class SerialInterface {'):h.index('\n};', h.index('class SerialInterface {'))+3].replace('private:', 'public:')
-methods = s[s.index('void SerialInterface::enqueue'):s.index('void SerialInterface::writeGreetingMessage')]
+methods = s[s.index('void SerialInterface::enqueue'):s.index('#if LILKA_LOG_LEVEL >= 2\nvoid SerialInterface::writeGreetingMessage')]
 methods += s[s.index('void SerialInterface::drainOnce'):s.index('void SerialInterface::run()')]
+methods += s[s.index('ssize_t SerialInterface::stdio_vfs_write'):s.index('SerialInterface serial;')]
 methods += 'SerialInterface serial;\n' + s[s.index('int serial_idf('):s.index('SerialInterface::SerialInterface()')]
 prefix = r'''
+#include "log_config.h"
 #include <string>
 #include <queue>
 #include <atomic>
@@ -30,6 +32,9 @@ SemaphoreHandle_t xSemaphoreCreateMutex(){return new std::mutex;}
 bool xSemaphoreTake(SemaphoreHandle_t m,unsigned timeout){assert(timeout==0);if(!m->try_lock())return false;held=true;return true;}
 void xSemaphoreGive(SemaphoreHandle_t m){held=false;m->unlock();}
 unsigned long millis(){return 1234;}
+#define STDIN_FD 0
+#define STDOUT_FD 1
+#define STDERR_FD 2
 #define SERIAL_BAUD_RATE 115200
 #define TX_BUFFER_SIZE 256
 #define LILKA_LOG_FORMAT "[L] "
@@ -74,7 +79,29 @@ int main(){
 assert 'Serial.flush()' not in s
 assert 'return serial.idfV(format, args);' in s and 'serial.log("%s", str.c_str())' in s
 assert 'msgbuffer' not in s
+quiet = r'''
+SerialInterface::SerialInterface() {}
+int main(){
+ SerialInterface logger;
+ for(unsigned n=0;n<10000;++n)logger.log("suppressed info %u",n);
+ assert(logger.serialQueue.empty() && logger.pending.isEmpty() && logger.droppedLogs()==0);
+ Serial.available=999;
+ logger.err("visible error %u",42);logger.drainOnce();
+ assert(Serial.text.find("visible error 42")!=std::string::npos);
+ assert(Serial.text.find("suppressed info")==std::string::npos);
+ const char user[]="explicit user console %s %n";
+ assert(logger.stdio_vfs_write(STDOUT_FD,user,sizeof(user)-1)==sizeof(user)-1);
+ serial.drainOnce();assert(Serial.text.find(user)!=std::string::npos);
+ delete logger.serialMutex;delete serial.serialMutex;
+ puts("Production error-only logger: no info formatting/queue/backpressure; error retained PASS");
+}
+'''
 with tempfile.TemporaryDirectory(prefix='sdk-serial-host-') as td:
- p=Path(td);(p/'test.cpp').write_text(prefix+cls+methods+body)
- subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-g','-O1','-pthread','-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie',str(p/'test.cpp'),'-o',str(p/'test')],check=True)
- subprocess.run([str(p/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=1'})
+ p=Path(td)
+ for level in (1,2):
+  (p/'test.cpp').write_text(prefix+cls+'\nextern SerialInterface serial;\n'+methods+(quiet if level==1 else body))
+  subprocess.run(['g++','-std=c++17','-Wall','-Wextra','-Werror','-g','-O1','-pthread',
+                  '-DLILKA_LOG_LEVEL='+str(level),'-I'+str(src),
+                  '-fsanitize=address,undefined','-fno-omit-frame-pointer','-fno-pie','-no-pie',
+                  str(p/'test.cpp'),'-o',str(p/'test')],check=True)
+  subprocess.run([str(p/'test')],check=True,env={**os.environ,'ASAN_OPTIONS':'detect_leaks=1'})

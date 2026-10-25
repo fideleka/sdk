@@ -33,7 +33,8 @@ String NetworkCredentials::slotKey(unsigned slot) {
 
 bool NetworkCredentials::load(Preferences& prefs, unsigned slot, Record& record) {
     const String key = slotKey(slot);
-    if (prefs.getBytesLength(key.c_str()) != sizeof(record) ||
+    // Empty slots are normal, not Preferences getBytesLength() error events.
+    if (!prefs.isKey(key.c_str()) || prefs.getBytesLength(key.c_str()) != sizeof(record) ||
         prefs.getBytes(key.c_str(), &record, sizeof(record)) != sizeof(record)) {
         return false;
     }
