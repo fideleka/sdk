@@ -2,6 +2,7 @@
 
 #if LILKA_VERSION == 2 && CONFIG_IDF_TARGET_ESP32S3
 #    include "rgb565_pack.h"
+#    include "display_profile.h"
 #    include "spi.h"
 #    include "serial.h"
 #    include <esp_heap_caps.h>
@@ -45,6 +46,7 @@ struct PixelDMABus::State {
     }
 
     void start(unsigned buffer, size_t bytes) {
+        displayProfile::Scope metric(displayProfile::Stage::NativeFeed);
         if (gdma_reset(channel) != ESP_OK) fault();
         descriptor = {};
         descriptor.buf = buffers[buffer];
@@ -68,6 +70,7 @@ struct PixelDMABus::State {
     }
 
     void wait() {
+        displayProfile::Scope metric(displayProfile::Stage::NativeWait);
         // SPI transaction-done, NOT GDMA EOF (FIFO may still be shifting).
         if (xSemaphoreTake(done, pdMS_TO_TICKS(100)) != pdTRUE) fault();
         if (GPSPI3.cmd.usr || gdma_stop(channel) != ESP_OK) fault();
@@ -134,7 +137,10 @@ void PixelDMABus::writePixels(uint16_t* pixels, uint32_t count) {
     bool pending = false;
     while (count) {
         const uint32_t length = count < State::ChunkBytes / 2 ? count : State::ChunkBytes / 2;
-        packRGB565(state->buffers[buffer], pixels, length);
+        {
+            displayProfile::Scope metric(displayProfile::Stage::NativePack, length * 2);
+            packRGB565(state->buffers[buffer], pixels, length);
+        }
         if (pending) state->wait();
         state->start(buffer, length * 2);
         pending = true;
