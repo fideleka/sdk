@@ -46,7 +46,9 @@ struct PixelDMABus::State {
     }
 
     void start(unsigned buffer, size_t bytes) {
+#    if LILKA_MEASURE_DISPLAY
         displayProfile::Scope metric(displayProfile::Stage::NativeFeed);
+#    endif
         if (gdma_reset(channel) != ESP_OK) fault();
         descriptor = {};
         descriptor.buf = buffers[buffer];
@@ -70,7 +72,9 @@ struct PixelDMABus::State {
     }
 
     void wait() {
+#    if LILKA_MEASURE_DISPLAY
         displayProfile::Scope metric(displayProfile::Stage::NativeWait);
+#    endif
         // SPI transaction-done, NOT GDMA EOF (FIFO may still be shifting).
         if (xSemaphoreTake(done, pdMS_TO_TICKS(100)) != pdTRUE) fault();
         if (GPSPI3.cmd.usr || gdma_stop(channel) != ESP_OK) fault();
@@ -138,7 +142,9 @@ void PixelDMABus::writePixels(uint16_t* pixels, uint32_t count) {
     while (count) {
         const uint32_t length = count < State::ChunkBytes / 2 ? count : State::ChunkBytes / 2;
         {
+#    if LILKA_MEASURE_DISPLAY
             displayProfile::Scope metric(displayProfile::Stage::NativePack, length * 2);
+#    endif
             packRGB565(state->buffers[buffer], pixels, length);
         }
         if (pending) state->wait();

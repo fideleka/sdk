@@ -1250,7 +1250,9 @@ void DeviceManager::spiClose(void* context) {
 }
 
 int DeviceManager::submit(spi_transaction_t& transfer, const uint8_t* bytes, uint32_t bits) {
+#    if LILKA_MEASURE_DISPLAY
     displayProfile::Scope metric(displayProfile::Stage::ExternalFeed);
+#    endif
     transfer = {};
     transfer.length = bits;
     transfer.tx_buffer = bytes;
