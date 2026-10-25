@@ -31,6 +31,8 @@ mock = r'''
 #define LILKA_P3 48
 using TaskHandle_t=void*;
 using BaseType_t=int;
+using UBaseType_t=unsigned;
+#define configMAX_PRIORITIES 25
 #define tskNO_AFFINITY 0x7fffffff
 #define portNUM_PROCESSORS 2
 #define pdPASS 1
@@ -616,10 +618,11 @@ int main(int argc,char**argv){
  puts("PASS: transactional pin drafts, preview/no-op, prevalidation, full swaps, one restart/save, stale rejection and rollback/fallback");
  // Restore the selected route, but Select-held recovery forces Internal.
  nvm.clear();nvm["displayMode"]={DeviceManager::Both};
- {DeviceManager m;registered(m,0);assert(m.begin(false));assert(createdCore==tskNO_AFFINITY&&createdPriority==1);assert(m.displayMode()==DeviceManager::Both);assert(m.begin(false));assert(!m.setWorkerCore(1));}
+ {DeviceManager m;registered(m,0);assert(m.begin(false));assert(createdCore==tskNO_AFFINITY&&createdPriority==1);assert(m.displayMode()==DeviceManager::Both);assert(m.begin(false));assert(!m.setWorkerCore(1));assert(!m.setWorkerPriority(2));}
  {DeviceManager m;registered(m,0);assert(!m.setWorkerCore(-1));assert(!m.setWorkerCore(2));assert(m.setWorkerCore(0));assert(m.setWorkerCore(1));assert(m.begin(false));assert(createdCore==1&&createdPriority==1);assert(!m.setWorkerCore(tskNO_AFFINITY));}
- {DeviceManager m;registered(m,0);assert(m.setWorkerCore(1));failWorker=true;assert(!m.begin(false));assert(m.internalOutput()&&!m.externalOutput());failWorker=false;assert(m.setWorkerCore(0));assert(m.begin(false));assert(createdCore==0);}
- puts("PASS: opt-in display affinity, unchanged default/priority, invalid/late rejection and allocation failure retry");
+ {DeviceManager m;registered(m,0);assert(!m.setWorkerPriority(0));assert(!m.setWorkerPriority(configMAX_PRIORITIES));assert(!m.setWorkerPriority(~0u));assert(m.setWorkerPriority(configMAX_PRIORITIES-1));assert(m.begin(false));assert(createdCore==tskNO_AFFINITY&&createdPriority==configMAX_PRIORITIES-1);assert(!m.setWorkerPriority(1));}
+ {DeviceManager m;registered(m,0);assert(m.setWorkerCore(1));assert(m.setWorkerPriority(2));assert(!m.setWorkerPriority(0));assert(!m.setWorkerPriority(configMAX_PRIORITIES));failWorker=true;assert(!m.begin(false));assert(m.internalOutput()&&!m.externalOutput());failWorker=false;assert(m.setWorkerCore(0));assert(m.begin(false));assert(createdCore==0&&createdPriority==2);assert(!m.setWorkerPriority(3));}
+ puts("PASS: opt-in display affinity/priority, unchanged defaults, invalid/late rejection and allocation failure retry");
  {DeviceManager m;assert(m.begin(true));assert(m.displayMode()==DeviceManager::Internal);}
  nvm["displayMode"]={255};
  {DeviceManager m;assert(m.begin(false));assert(m.displayMode()==DeviceManager::Internal);}
