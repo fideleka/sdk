@@ -368,6 +368,7 @@ private:
     int16_t windowX = 0, windowY = 0;
     uint16_t windowWidth = 0, windowHeight = 0;
     uint32_t windowOffset = 0, routeGeneration = 0;
+    bool renderingActive() const;
     bool nativeOutput() const;
     Canvas* routingCanvas();
     void publishRouting();

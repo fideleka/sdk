@@ -266,6 +266,7 @@ void Display::draw16bitRGBBitmapWithTranColor(
     int16_t x, int16_t y, const uint16_t bitmap[], uint16_t transparent_color, int16_t w, int16_t h
 ) {
     DisplayFrame completed(*this);
+    if (!renderingActive()) return;
     if (auto* canvas = routingCanvas()) {
         canvas->draw16bitRGBBitmapWithTranColor(x, y, bitmap, transparent_color, w, h);
         routingDirty = true;
@@ -294,6 +295,7 @@ void Display::presentCanvas(Canvas* canvas) {
 }
 
 bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& incoming, uint32_t now) {
+    if (!nativeOutput()) return false;
     VolumeOverlaySnapshot state = incoming;
     const auto light = brightness.getOverlay();
     if (light.visible(now) && (!state.visible(now) || now - light.adjustedAt < now - state.adjustedAt)) {
@@ -324,6 +326,7 @@ bool Display::prepareSystemOverlay(const VolumeOverlaySnapshot& incoming, uint32
 }
 
 void Display::presentCanvasOutsideOverlay(Canvas* canvas, int parity) {
+    if (!nativeOutput()) return;
     const auto& g = overlayClip;
     if (!g.width || canvas->x() + canvas->width() <= g.x || canvas->x() >= g.x + g.width ||
         canvas->y() + canvas->height() <= g.y || canvas->y() >= g.y + g.height) {
@@ -360,6 +363,7 @@ void Display::presentCanvasOutsideOverlay(Canvas* canvas, int parity) {
 }
 
 void Display::clearOutsideOverlay(uint16_t color) {
+    if (!nativeOutput()) return;
     const auto& g = overlayClip;
     if (!g.width) {
         fillScreen(color);
@@ -377,6 +381,7 @@ bool Display::systemOverlayNeedsTransfer() const {
 
 void Display::finishSystemOverlay(Canvas* const* layers, int count) {
     DisplayFrame completed(*this);
+    if (!nativeOutput()) return;
     const auto g = overlayClip;
     if (!systemOverlayNeedsTransfer()) return;
     // One LCD window, complete final pixels only. Expiry composes black margins
@@ -409,6 +414,11 @@ void Display::finishSystemOverlay(Canvas* const* layers, int count) {
 
 void Display::drawCanvas(Canvas* canvas) {
     DisplayFrame completed(*this);
+    if (!renderingActive()) return;
+    if (!nativeOutput()) {
+        presentCanvas(canvas);
+        return;
+    }
     if (canvas->x() == 0 && canvas->y() == 0 && canvas->width() == width() && canvas->height() == height()) {
         prepareSystemOverlay(audio.getVolumeOverlay(), millis());
         presentCanvasOutsideOverlay(canvas);
@@ -420,6 +430,13 @@ void Display::drawCanvas(Canvas* canvas) {
 }
 
 void Display::drawSystemOverlay() {
+    DisplayFrame completed(*this);
+    if (!nativeOutput()) {
+        // Static direct-render apps still need external feedback/expiry, but no
+        // native overlay preparation or row packing when that panel is off.
+        if (renderingActive() && devices.externalOutput()) routingDirty = true;
+        return;
+    }
     prepareSystemOverlay(audio.getVolumeOverlay(), millis());
     // This compatibility API cannot restore an expired panel without sources.
     // Multi-layer renderers must use the transaction API above.
@@ -431,6 +448,8 @@ void Display::drawSystemOverlay() {
 }
 
 void Display::drawCanvasInterlaced(Canvas* canvas, bool odd) {
+    DisplayFrame completed(*this);
+    if (!renderingActive()) return;
     this->startWrite();
     for (int y = odd ? 1 : 0; y < canvas->height(); y += 2) {
         this->writeAddrWindow(canvas->x(), canvas->y() + y, canvas->width(), 1);

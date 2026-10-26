@@ -202,3 +202,49 @@ Set ``ARDUINOJSON_INCLUDE`` when running that suite from a clean worktree withou
 cached sibling Keira dependencies. The reported device panic was not independently
 reproduced or attributed to a unique cause; this change removes live intermediate
 pin configurations and tests the requested transaction contract.
+
+Inactive and sleeping presentation
+----------------------------------
+
+Display selection and inactivity sleep are separate from driver discovery.
+Only selected, awake outputs perform frame work. A configured idle timeout does
+not itself suspend rendering; the active full-off/sleep state does. Dimming does
+not stop rendering.
+
+``capture()`` returns false before locking or composing when its sleep argument
+is true, the manager is sleeping, or external output is inactive. It does not
+compose a black frame for sleep. ``presentInternal()`` similarly returns before
+locks/copies when native output is disabled or asleep. Applications should keep
+input/wake servicing alive and redraw their current state after wake.
+
+The external worker waits on a task notification indefinitely while asleep or
+unrouted. It does not poll driver frame intervals or issue pixel transfers in
+that state. Mode requests and routing/power transitions notify the existing worker. No new task, periodic timer, or
+persistent setting is needed. Active presentation retains its existing pacing.
+Already-started SPI transactions/DMA are allowed to finish before a route or
+power transition releases their frame ownership.
+
+Direct native drawing keeps transaction start/end pairing if selection changes
+mid-transaction. Once idle, guarded bitmap/buffered-text paths skip glyph drawing,
+retained pixel copies, frame composition, and display traffic. Shared retained
+canvases still serve whichever output remains active; application-owned offscreen
+state is not globally paused.
+
+Physical presence is not driver availability
+--------------------------------------------
+
+The current SPI host configures no MISO pin and the ABI exposes write-only SPI
+callbacks. Successful driver initialization, ``Info.active``, or an SPI transfer
+only proves software/host availability, not that a panel is physically connected.
+SPI writes have no receiver acknowledgment. Do not infer presence from those
+results or automatically erase the user's enable/mode settings on that basis.
+
+Reliable automatic connection detection needs a verified readback path supported
+by the actual panel/module (for example, a correctly wired SDO/MISO signal and a
+bounded controller-ID/status read), or a dedicated presence-detect contact/GPIO.
+The actual module and wiring must be checked before choosing that implementation.
+An unsupported probe must mean "unknown", not "disconnected". A future presence
+feature should preserve user preferences, separate transient availability from
+persistent enablement, and fall back to native output when absence is verified.
+No presence probe, new GPIO assignment, or automatic driver toggle is introduced
+by the render-activity guards.

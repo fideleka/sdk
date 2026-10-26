@@ -93,6 +93,7 @@ public:
         return generation.load();
     }
     // Compositor task only, holding layer locks. Never blocks on driver transfers.
+    // Sleeping/inactive output returns false without locks, composition or publication.
     bool capture(lilka::Canvas* panel, lilka::Canvas* app, const lilka::VolumeOverlaySnapshot& overlay, bool sleeping);
     // Same compositor task, with no canvas locks. Both LCDs read shared pixels.
     bool presentInternal();
@@ -161,6 +162,7 @@ private:
     std::atomic<unsigned> cycleRequests{0};
     std::atomic<bool> sleeping{false};
     std::atomic<bool> presentationReady{true};
+    void wakeWorker();
     void run();
     static void workerEntry(void* context);
     bool load(Slot& slot, const char* path);

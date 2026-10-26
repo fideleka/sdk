@@ -209,8 +209,14 @@ bool DeviceManager::begin(bool skip) {
 void DeviceManager::workerEntry(void* context) {
     static_cast<DeviceManager*>(context)->run();
 }
+void DeviceManager::wakeWorker() {
+    if (worker) xTaskNotifyGive(worker);
+}
 void DeviceManager::requestCycle() {
-    if (workerReady && hasRegisteredDriver()) ++cycleRequests;
+    if (workerReady && hasRegisteredDriver()) {
+        ++cycleRequests;
+        wakeWorker();
+    }
 }
 void DeviceManager::setPresentationReady(bool ready) {
     presentationReady = ready;
@@ -576,6 +582,7 @@ bool DeviceManager::route() {
         return false;
     }
     ++generation;
+    wakeWorker();
     return true;
 }
 void DeviceManager::deactivate() {
@@ -881,8 +888,9 @@ bool DeviceManager::setDisplayMode(Mode value) {
 bool DeviceManager::capture(
     lilka::Canvas* panel, lilka::Canvas* app, const lilka::VolumeOverlaySnapshot& overlay, bool sleeping
 ) {
+    if (sleeping || this->sleeping.load() || !externalOutput()) return false;
     if (xSemaphoreTake(frameMutex, 0) != pdTRUE) return false;
-    bool good = frame && routed.load() && mode != Internal;
+    bool good = frame && routed.load() && mode != Internal && !this->sleeping.load();
     const int w = lilka::display.width(), h = lilka::display.height();
     if (good && w > 0 && h > 0 && w <= 320 && h <= 320 && static_cast<size_t>(w) * h <= frameCapacity) {
 #    if LILKA_MEASURE_DISPLAY
@@ -893,11 +901,11 @@ bool DeviceManager::capture(
         // Reuse the other frame even if it was previously published: latest wins.
         const unsigned outputIndex = externalReading == 0 ? 1 : 0;
         auto* output = frames[outputIndex];
-        const auto top = layerView(sleeping ? nullptr : app);
-        const auto status = layerView(sleeping ? nullptr : panel);
+        const auto top = layerView(app);
+        const auto status = layerView(panel);
         const auto geometry = lilka::volumeOverlayGeometry(w, h);
         const uint32_t overlayNow = millis();
-        const bool overlayVisible = !sleeping && overlay.visible(overlayNow) && geometry.width;
+        const bool overlayVisible = overlay.visible(overlayNow) && geometry.width;
         uint16_t scratch[320]; // One temporary row, not another framebuffer.
         bool changed = false;
         for (int y = 0; y < h; ++y) {
@@ -949,12 +957,13 @@ bool DeviceManager::capture(
     return good;
 }
 bool DeviceManager::presentInternal() {
+    if (sleeping.load() || !internalOutput() || !externalOutput()) return false;
     // Only the compositor calls capture/presentInternal, in sequence. Protect
     // lifetime against settings/rerouting, but release frameMutex before SPI so
     // the external worker can acquire/release its lease during internal DMA.
     xSemaphoreTake(internalMutex, portMAX_DELAY);
     xSemaphoreTake(frameMutex, portMAX_DELAY);
-    const bool good = frameValid && routed.load() && mode == Both;
+    const bool good = frameValid && routed.load() && mode == Both && internal.load() && !sleeping.load();
     // Arduino_GFX's const bitmap overload writes one pixel at a time. Its RAM
     // overload uses bulk writePixels and does not modify the source on the SDK's ESP32 HWSPI bus.
     uint16_t* pixels = good ? frame : nullptr;
@@ -1032,17 +1041,27 @@ void DeviceManager::run() {
     while (true) {
         const unsigned cycles = cycleRequests.exchange(0);
         if (cycles) setDisplayMode(static_cast<Mode>((mode.load() + cycles) % 3));
+        if (sleeping.load() || !externalOutput()) {
+            // Route, wake and input requests notify us. No idle SPI polling.
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
         xSemaphoreTake(mutex, portMAX_DELAY);
+        const int index = active;
+        if (sleeping.load() || !routed.load() || index < 0 || index >= int(deviceCount) || index >= int(MaxDevices) ||
+            mode == Internal || !slots[index].active || !slots[index].enabled) {
+            xSemaphoreGive(mutex);
+            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            continue;
+        }
+        auto& slot = slots[index];
         const uint32_t interval =
-            active >= 0 && slots[active].descriptor->frame_interval_ms
-                ? slots[active].descriptor->frame_interval_ms(&slots[active].host, slots[active].state)
-                : 0;
+            slot.descriptor->frame_interval_ms ? slot.descriptor->frame_interval_ms(&slot.host, slot.state) : 0;
         const uint16_t* pixels = nullptr;
         uint16_t frameWidth = 0, frameHeight = 0;
         uint32_t rows[10] = {};
         xSemaphoreTake(frameMutex, portMAX_DELAY);
-        if (!sleeping && pending && frameValid && active >= 0 && mode != Internal &&
-            millis() - previousTransfer >= interval) {
+        if (!sleeping && pending && frameValid && millis() - previousTransfer >= interval) {
             pixels = frame;
             externalReading = frame == frames[0] ? 0 : 1;
             frameWidth = width;
@@ -1057,7 +1076,6 @@ void DeviceManager::run() {
 #    if LILKA_MEASURE_DISPLAY
             const int64_t start = esp_timer_get_time();
 #    endif
-            auto& slot = slots[active];
             const int result = presentPending(slot, pixels, frameWidth, frameHeight, rows);
             xSemaphoreTake(frameMutex, portMAX_DELAY);
             externalReading = -1;
@@ -1141,7 +1159,7 @@ void DeviceManager::run() {
         }
 #    endif
         xSemaphoreGive(mutex);
-        vTaskDelay(pdMS_TO_TICKS(routed ? 2 : 100));
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
 int32_t DeviceManager::spiOpen(void* context, int32_t clk, int32_t mosi, int32_t dc, int32_t reset, uint32_t hz) {

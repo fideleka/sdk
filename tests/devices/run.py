@@ -70,6 +70,9 @@ inline uint32_t millis(){return fakeTime;}
 inline int64_t esp_timer_get_time(){return fakeTime*1000;}
 struct Stop{};
 inline void vTaskDelay(unsigned ms){fakeTime+=ms;if(stopWorker)throw Stop{};}
+inline unsigned notificationGives=0,notificationWaits=0,lastNotificationTimeout=0,intervalReads=0;
+inline void xTaskNotifyGive(TaskHandle_t){++notificationGives;}
+inline unsigned ulTaskNotifyTake(int,unsigned ms){++notificationWaits;lastNotificationTimeout=ms;if(ms!=0xffffffff)fakeTime+=ms;if(stopWorker)throw Stop{};return 1;}
 #define pdMS_TO_TICKS(x) (x)
 #define pdTRUE 1
 #define portMAX_DELAY 0xffffffff
@@ -232,7 +235,7 @@ int main(int argc,char**argv){
  assert(m.setDisplayMode(DeviceManager::External));assert(m.setDisplayMode(DeviceManager::Both));
  assert(m.capture(&panel,&small,none,false));assert(m.frame[100*280+100]==0);assert(m.frame[40*280+20]==0x5678);
  assert(xSemaphoreTake(m.frameMutex,0));assert(!m.capture(&panel,&old,none,false));xSemaphoreGive(m.frameMutex);
- assert(m.capture(nullptr,nullptr,none,true));assert(m.frame[40*280+20]==0);
+ assert(!m.capture(nullptr,nullptr,none,true));assert(m.frame[40*280+20]==0x5678);
  assert(m.capture(nullptr,&small,none,false));
  stopWorker=true;try{m.run();}catch(Stop&){}stopWorker=false;assert(!m.pending);
 #if LILKA_MEASURE_DISPLAY
@@ -537,23 +540,37 @@ int main(int argc,char**argv){
  }
  assert(blackBytes>=240*320*2);
  assert(m.setDisplayMode(DeviceManager::Both));
- m.setSleeping(true);assert(m.sleeping&&m.displayMode()==DeviceManager::Both);
+ const auto* driver=m.slots[0].descriptor;kd_device observed=*driver;
+ observed.frame_interval_ms=+[](const void*,void*)->uint32_t{++intervalReads;return 0;};
+ m.slots[0].descriptor=&observed;m.worker=reinterpret_cast<void*>(1);
+ const auto sleepNotifications=notificationGives, intervalBefore=intervalReads;
+ m.setSleeping(true);assert(m.sleeping&&m.displayMode()==DeviceManager::Both&&notificationGives>sleepNotifications);
  lilka::Canvas app(0,0,280,240);lilka::VolumeOverlaySnapshot overlay;
- assert(m.capture(nullptr,&app,overlay,false));
+ assert(!m.capture(nullptr,&app,overlay,false));
+ const auto nativeWrites=lilka::display.writes;
+ m.frameValid=true;memset(m.internalDirtyRows,0xff,sizeof(m.internalDirtyRows));
+ assert(!m.presentInternal()&&lilka::display.writes==nativeWrites);
+ m.frameValid=false;
 
 #if LILKA_MEASURE_DISPLAY
  const auto transfers=m.transferCount;
 #endif
 stopWorker=true;
  try{m.run();}catch(const Stop&){}stopWorker=false;
+ assert(lastNotificationTimeout==portMAX_DELAY&&intervalReads==intervalBefore);
 
 #if LILKA_MEASURE_DISPLAY
  assert(m.transferCount==transfers);
 #endif
-m.setSleeping(false);assert(!m.sleeping);
+const auto wakeNotifications=notificationGives;m.setSleeping(false);assert(!m.sleeping&&notificationGives>wakeNotifications);
+ assert(m.capture(nullptr,&app,overlay,false));
+ stopWorker=true;try{m.run();}catch(const Stop&){}stopWorker=false;
+ assert(intervalReads==intervalBefore+1&&!m.pending);
  m.requestCycle();assert(m.cycleRequests==1);stopWorker=true;
  try{m.run();}catch(const Stop&){}stopWorker=false;
  assert(m.displayMode()==DeviceManager::Internal&&m.cycleRequests==0);
+ assert(lastNotificationTimeout==portMAX_DELAY&&intervalReads==intervalBefore+1);
+ m.slots[0].descriptor=driver;
  m.deactivate();assert(allocations.empty());
  }
 

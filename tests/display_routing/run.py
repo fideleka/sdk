@@ -2,10 +2,14 @@
 """Exercise production display routing on a deterministic native-LCD/Canvas model."""
 from pathlib import Path
 import subprocess
+import argparse
 import tempfile
 
 root = Path(__file__).resolve().parents[2]
 source = root / 'lib/lilka/src/lilka'
+parser=argparse.ArgumentParser()
+parser.add_argument("--source",type=Path,default=source/"display_routing.cpp")
+args=parser.parse_args()
 mock = r'''
 #pragma once
 #include <algorithm>
@@ -88,6 +92,8 @@ public:
     void draw16bitRGBBitmap(int16_t,int16_t,uint16_t*,int16_t,int16_t)override;
     void draw16bitRGBBitmap(int16_t,int16_t,const uint16_t*,int16_t,int16_t)override;
     void presentNativePixels(int16_t,int16_t,uint16_t*,int16_t,int16_t);
+    void drawSystemOverlay();bool prepareSystemOverlay(const VolumeOverlaySnapshot&,uint32_t){return false;}
+    bool overlayActive=false,overlayChanged=false;void finishSystemOverlay(Canvas*const*,int){};
     ~Display(){delete routedCanvas;}
 private:
     Canvas*routedCanvas=nullptr;
@@ -96,8 +102,9 @@ private:
     unsigned frameDepth=0,writeDepth=0;
     int16_t windowX=0,windowY=0;uint16_t windowWidth=0,windowHeight=0;
     uint32_t windowOffset=0,routeGeneration=0;
-    bool nativeOutput()const;Canvas*routingCanvas();void publishRouting();
+    bool renderingActive()const;bool nativeOutput()const;Canvas*routingCanvas();void publishRouting();
 };
+struct DisplayFrame{Display& d;DisplayFrame(Display& d):d(d){d.beginFrame();}~DisplayFrame(){d.endFrame();}};
 }
 '''
 header = (source/'display.h').read_text()
@@ -119,23 +126,28 @@ int main(){using namespace lilka;
  assert(devices.captures==0);output.endFrame();
  assert(!output.panelOn);
  assert(devices.captures==1&&devices.published[0]==42&&devices.published[3*280]==2&&devices.published[4*280+1]==6);
+ const auto feedbackCopies=devices.captures, feedbackWrites=output.writes;
+ output.drawSystemOverlay();assert(devices.captures==feedbackCopies+1&&output.writes==feedbackWrites);
  const auto retainedNative=output.native;
  // Doom-style sequential scanlines fill one address window, with no per-row publication.
  output.beginFrame();output.startWrite();output.writeAddrWindow(10,20,3,2);
  output.writePixels(pixels,3);output.writePixels(pixels+3,3);output.endWrite();
- assert(devices.captures==1);output.endFrame();assert(devices.captures==2);
+ assert(devices.captures==2);output.endFrame();assert(devices.captures==3);
  assert(devices.published[20*280+10]==1&&devices.published[21*280+12]==6&&output.native==retainedNative);
  // Mode change restores the retained native frame on the presentation owner.
  devices.internal=true;++devices.generation;output.beginFrame();output.endFrame();
- assert(output.native==devices.published&&devices.captures==3&&!output.bus&&output.panelOn);
+ assert(output.native==devices.published&&devices.captures==4&&!output.bus&&output.panelOn);
  // Route may change while a physical native transaction is open: end must still match start.
  output.beginFrame();output.startWrite();const auto starts=output.begins;
  devices.internal=false;output.writeAddrWindow(0,0,3,1);output.writePixels(pixels,3);output.endWrite();output.endFrame();
  assert(output.begins==starts&&output.ends==output.begins&&!output.bus);
  // Sleep suppresses native transfers; wake/mode invalidation restores the latest retained pixels.
  devices.internal=true;devices.sleeping=true;displaySettings.sleeping=true;
- const auto writes=output.writes;output.beginFrame();output.draw16bitRGBBitmap(0,0,pixels,3,2);output.endFrame();assert(output.writes==writes);
- devices.sleeping=false;displaySettings.sleeping=false;++devices.generation;output.beginFrame();output.endFrame();assert(output.native[280+2]==6);
+ const auto writes=output.writes, asleepCaptures=devices.captures;const auto retained=devices.published;
+ output.beginFrame();output.draw16bitRGBBitmap(0,0,pixels,3,2);output.writeFillRectPreclipped(0,0,280,240,0xbeef);output.endFrame();
+ assert(output.writes==writes&&devices.captures==asleepCaptures&&devices.published==retained);
+ output.presentNativePixels(0,0,pixels,3,2);assert(output.writes==writes);
+ devices.sleeping=false;displaySettings.sleeping=false;++devices.generation;output.beginFrame();output.draw16bitRGBBitmap(0,0,pixels,3,2);output.endFrame();assert(output.native[280+2]==6);
  // Doom's startup, loading, gameplay and paused/static frames remain ineligible,
  // including a frame after a gap longer than any saved timeout. Nested frames
  // service timers once, and re-enabling the policy restores the default behavior.
@@ -157,7 +169,10 @@ with tempfile.TemporaryDirectory(prefix='sdk-display-route-') as directory:
     (tmp/'display.h').write_text(mock)
     for name in ['devices.h','display_settings.h','audio.h','brightness.h']:
         (tmp/name).write_text('#pragma once\n#include "display.h"\n')
-    (tmp/'display_routing.cpp').write_text((source/'display_routing.cpp').read_text())
+    overlay_source = (source/'display.cpp').read_text()
+    begin = overlay_source.index('void Display::drawSystemOverlay()')
+    end = overlay_source.index('\nvoid Display::drawCanvasInterlaced', begin)
+    (tmp/'display_routing.cpp').write_text(args.source.read_text() + '\nnamespace lilka {\n' + overlay_source[begin:end] + '\n}\n')
     (tmp/'test.cpp').write_text(checks)
     for flags in [[], ['-fsanitize=address,undefined','-fno-pie','-no-pie']]:
         subprocess.run(['g++','-std=c++11','-Wall','-Wextra','-Werror',*flags,'-I'+str(tmp),str(tmp/'display_routing.cpp'),str(tmp/'test.cpp'),'-o',str(tmp/'test')],check=True)
