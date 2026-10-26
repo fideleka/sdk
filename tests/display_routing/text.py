@@ -70,18 +70,18 @@ struct Canvas : Arduino_GFX {
  void drawPixel(int16_t x,int16_t y,uint16_t c){if(x>=0&&y>=0&&x<160&&y<80)pixels[y*160+x]=c;}
 };
 struct Display : Arduino_GFX {
- Canvas retained;std::vector<uint16_t> pixels;bool native=true;unsigned frames=0,depth=0;
+ Canvas retained;std::vector<uint16_t> pixels;bool native=true,awake=true;unsigned frames=0,depth=0;
  Display():Arduino_GFX(160,80),pixels(160*80,0){}
  bool begin(int32_t=-1)override{return true;}
  void writePixelPreclipped(int16_t x,int16_t y,uint16_t c)override{drawPixel(x,y,c);}
- bool nativeOutput(){return native;}Canvas*routingCanvas(){return &retained;}
+ bool renderingActive()const{return awake;}bool nativeOutput(){return native;}Canvas*routingCanvas(){return &retained;}
  bool routingDirty=false,nativeBypass=false;
- void drawPixel(int16_t x,int16_t y,uint16_t c){retained.drawPixel(x,y,c);if(native&&x>=0&&y>=0&&x<160&&y<80)pixels[y*160+x]=c;}
+ void drawPixel(int16_t x,int16_t y,uint16_t c){assert(awake);retained.drawPixel(x,y,c);if(native&&x>=0&&y>=0&&x<160&&y<80)pixels[y*160+x]=c;}
  using Arduino_GFX::write;
  size_t write(const uint8_t*,size_t)override;
  void drawChar(int16_t,int16_t,unsigned char,uint16_t,uint16_t)override;
 };
-struct DisplayFrame{Display&d;DisplayFrame(Display&d):d(d){++d.depth;}~DisplayFrame(){if(--d.depth==0)++d.frames;}};
+struct DisplayFrame{Display&d;DisplayFrame(Display&d):d(d){++d.depth;}~DisplayFrame(){if(--d.depth==0&&d.renderingActive())++d.frames;}};
 """
     + method
     + r"""
@@ -89,6 +89,7 @@ struct DisplayFrame{Display&d;DisplayFrame(Display&d):d(d){++d.depth;}~DisplayFr
 int main(){
  for(int scale:{1,2})for(bool opaque:{false,true}){
  lilka::Display both,external;
+ external.awake=false;external.print("Sleep / Спить");external.awake=true;
  external.native=false;
  for(auto*d:{&both,&external}){
  d->setFont(u8g2_font_6x12_t_cyrillic);d->setUTF8Print(true);

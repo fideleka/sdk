@@ -7,6 +7,12 @@
 #include <new>
 
 namespace lilka {
+bool Display::renderingActive() const {
+    // Finish an already-open physical transaction even if its route changes.
+    return !routingStarted || nativeBypass || (writeDepth && nativeWrite) ||
+           (!devices.isSleeping() && !displaySettings.isSleeping() &&
+            (devices.internalOutput() || devices.externalOutput()));
+}
 bool Display::nativeOutput() const {
     return !routingStarted || nativeBypass ||
            (writeDepth ? nativeWrite
@@ -57,7 +63,7 @@ void Display::displayOff() {
 }
 void Display::serviceOutputPower() {
     if (!routingStarted || writeDepth) return;
-    const bool powered = devices.internalOutput() && !devices.isSleeping();
+    const bool powered = devices.internalOutput() && !devices.isSleeping() && !displaySettings.isSleeping();
     if (powered != nativePanelOn) {
         if (powered) displayOn();
         else displayOff();
@@ -75,7 +81,7 @@ void Display::endFrame() {
 }
 void Display::publishRouting() {
     serviceOutputPower();
-    if (nativeBypass || layeredPresentation || !routedCanvas) return;
+    if (nativeBypass || layeredPresentation || !routedCanvas || !renderingActive()) return;
     const auto generation = devices.invalidation();
     if (generation != routeGeneration) {
         routingDirty = true;
@@ -115,6 +121,7 @@ void Display::writeAddrWindow(int16_t x, int16_t y, uint16_t w, uint16_t h) {
     if (nativeOutput()) Arduino_ST7789::writeAddrWindow(x, y, w, h);
 }
 void Display::writePixels(uint16_t* pixels, uint32_t count) {
+    if (!renderingActive()) return;
     if (auto* canvas = routingCanvas()) {
         const uint32_t available = uint32_t(windowWidth) * windowHeight;
         uint32_t offset = 0;
@@ -132,6 +139,7 @@ void Display::writePixels(uint16_t* pixels, uint32_t count) {
     if (nativeOutput()) Arduino_ST7789::writePixels(pixels, count);
 }
 void Display::writePixelPreclipped(int16_t x, int16_t y, uint16_t color) {
+    if (!renderingActive()) return;
     if (auto* canvas = routingCanvas()) {
         canvas->drawPixel(x, y, color);
         routingDirty = true;
@@ -139,6 +147,7 @@ void Display::writePixelPreclipped(int16_t x, int16_t y, uint16_t color) {
     if (nativeOutput()) Arduino_ST7789::writePixelPreclipped(x, y, color);
 }
 void Display::writeFillRectPreclipped(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color) {
+    if (!renderingActive()) return;
     if (auto* canvas = routingCanvas()) {
         canvas->fillRect(x, y, w, h, color);
         routingDirty = true;
@@ -155,18 +164,20 @@ void Display::draw16bitRGBBitmap(int16_t x, int16_t y, const uint16_t* pixels, i
     draw16bitRGBBitmap(x, y, const_cast<uint16_t*>(pixels), w, h);
 }
 void Display::draw16bitRGBBitmap(int16_t x, int16_t y, uint16_t* pixels, int16_t w, int16_t h) {
-    beginFrame();
+    DisplayFrame completed(*this);
+    if (!renderingActive()) return;
     if (auto* canvas = routingCanvas()) {
         canvas->draw16bitRGBBitmap(x, y, pixels, w, h);
         routingDirty = true;
     }
     if (nativeOutput()) Arduino_ST7789::draw16bitRGBBitmap(x, y, pixels, w, h);
-    endFrame();
 }
 void Display::presentNativePixels(int16_t x, int16_t y, uint16_t* pixels, int16_t w, int16_t h) {
+    if (routingStarted && (!devices.internalOutput() || devices.isSleeping() || displaySettings.isSleeping())) return;
+    const bool previous = nativeBypass;
     nativeBypass = true;
     Arduino_ST7789::draw16bitRGBBitmap(x, y, pixels, w, h);
-    nativeBypass = false;
+    nativeBypass = previous;
 }
 
 } // namespace lilka
