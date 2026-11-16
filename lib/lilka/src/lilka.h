@@ -19,6 +19,7 @@
 #include "lilka/multiboot.h"
 #include "lilka/resources.h"
 #include "lilka/partitions.h"
+#include "lilka/sys.h"
 #include "lilka/stringutils.h"
 #include "lilka/fmath.h"
 #include "lilka/audio.h"

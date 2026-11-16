@@ -51,11 +51,19 @@ Display::Display() :
 void Display::begin() {
     // Read display frequency and SPI mode from NVS
     Preferences prefs;
-    prefs.begin(LILKA_SPI_NVS_NAMESPACE, true);
-    uint32_t displayFrequency = prefs.getUInt(LILKA_SPI_NVS_DISPLAY_FREQUENCY_KEY, LILKA_DISPLAY_FREQUENCY);
-    uint8_t displayMode = prefs.getUChar(LILKA_SPI_NVS_DISPLAY_MODE_KEY, LILKA_DISPLAY_SPI_MODE);
-    prefs.end();
+    uint32_t displayFrequency = LILKA_DISPLAY_FREQUENCY;
+    uint8_t displayMode = LILKA_DISPLAY_SPI_MODE;
+    if (prefs.begin(LILKA_SPI_NVS_NAMESPACE, true)) {
+        if (prefs.isKey(LILKA_SPI_NVS_DISPLAY_FREQUENCY_KEY))
+            displayFrequency = prefs.getUInt(LILKA_SPI_NVS_DISPLAY_FREQUENCY_KEY, LILKA_DISPLAY_FREQUENCY);
+        if (prefs.isKey(LILKA_SPI_NVS_DISPLAY_MODE_KEY))
+            displayMode = prefs.getUChar(LILKA_SPI_NVS_DISPLAY_MODE_KEY, LILKA_DISPLAY_SPI_MODE);
+        prefs.end();
+    }
 
+    if (displayFrequency != 10000000 && displayFrequency != 20000000 && displayFrequency != 40000000 &&
+        displayFrequency != 80000000)
+        displayFrequency = LILKA_DISPLAY_FREQUENCY;
     if (displayMode > SPI_MODE3) displayMode = LILKA_DISPLAY_SPI_MODE;
 
     serial.log("initializing display at %d Hz, SPI mode %d", displayFrequency, displayMode);

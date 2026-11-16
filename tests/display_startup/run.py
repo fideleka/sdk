@@ -39,13 +39,28 @@ inline TaskHandle_t xTaskGetIdleTaskHandleForCPU(int){return nullptr;}
 inline void esp_task_wdt_delete(void*){}
 namespace lilka {
 namespace colors {constexpr uint16_t Black=0;}
-struct Serial {void begin(){} void log(const char*){}};
+struct Serial {void begin(){} template<class... T>void log(const char*,T...){}};
 inline Serial serial;
 struct Subsystem {void begin(){}};
 inline Subsystem multiboot,buzzer,audio,battery;
 inline void spi_begin(){}
 struct Files {void begin(){events.push_back(2);}};
 inline Files fileutils;
+struct Config {void reload(){assert(events.back()==2);}};
+inline Config config;
+#define LILKA_DISPLAY_FREQUENCY 80000000
+#define LILKA_DISPLAY_SPI_MODE 3
+#define SPI_MODE3 3
+#define LILKA_SPI_NVS_NAMESPACE "spi"
+#define LILKA_SPI_NVS_DISPLAY_FREQUENCY_KEY "dispFrequency"
+#define LILKA_SPI_NVS_DISPLAY_MODE_KEY "dispMode"
+struct Preferences {
+ bool begin(const char*,bool){return scenario!=3;}
+ bool isKey(const char*){return scenario!=4;}
+ uint32_t getUInt(const char*,uint32_t){return scenario==5?0:20000000;}
+ uint8_t getUChar(const char*,uint8_t){return scenario==5?255:1;}
+ void end(){}
+};
 struct Brightness {
  bool begin(bool active){assert(!active);nativeLight=active;events.push_back(1);return LILKA_INDEPENDENT_BACKLIGHT;}
  bool isEnabled(){return LILKA_INDEPENDENT_BACKLIGHT;}
@@ -55,11 +70,13 @@ struct Brightness {
 inline Brightness brightness;
 struct Native {
  std::vector<uint16_t> pixels=std::vector<uint16_t>(280*240,0x1234);
- void begin(int){assert(events.back()==2);if(LILKA_INDEPENDENT_BACKLIGHT)assert(!nativeLight&&pin==0);events.push_back(3);}
+ void begin(int freq){assert(freq==((scenario==0)?20000000:80000000));assert(events.back()==2);if(LILKA_INDEPENDENT_BACKLIGHT)assert(!nativeLight&&pin==0);events.push_back(3);}
  void fillScreen(uint16_t c){assert(c==0);std::fill(pixels.begin(),pixels.end(),c);cleared=true;events.push_back(4);}
 };
 using Arduino_ST7789=Native;
+using Arduino_TFT=Native;
 struct Display:Native {
+ int _override_datamode=3;
  void begin();void setFont(int){} void setUTF8Print(bool){}
  void enableRouting(){assert(events.back()==5);assert(held);events.push_back(6);}
  void displayOff(){}void displayOn(){}
@@ -91,6 +108,7 @@ TEST = r'''
 int main(int argc,char**argv){
  assert(argc==3);savedMode=std::atoi(argv[1]);scenario=std::atoi(argv[2]);
  lilka::begin();
+ assert(lilka::display._override_datamode==((scenario==0)?1:3));
  assert(events==std::vector<int>({1,2,3,4,5,6,7,8}));
  assert(nativeLight==lilka::devices.internalOutput());
  assert(externalLight==lilka::devices.externalOutput());
